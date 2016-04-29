@@ -15,7 +15,7 @@ addons:
     packages:
       - tree
 before_install:
-  - if [[ $TRAVIS_OS_NAME == 'osx' ]]; then brew update && brew install tree ; fi
+  - if [[ $TRAVIS_OS_NAME == 'osx' ]]; then brew install tree ; fi
 after_failure:
   - tree -h
 env:
