@@ -1,6 +1,9 @@
-# rust-cfile [![travis](https://travis-ci.org/flier/rust-cfile.svg?branch=master)](https://travis-ci.org/flier/rust-cfile)
+# rust-cfile 
 
 Rust bindings to C FILE stream
+
+[![crates.io](http://meritbadge.herokuapp.com/rust-cfile)](https://crates.io/crates/rust-cfile)
+[![travis](https://travis-ci.org/flier/rust-cfile.svg?branch=master)](https://travis-ci.org/flier/rust-cfile)
 
 [Document](http://flier.github.io/rust-cfile/doc/cfile)
 
