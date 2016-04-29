@@ -1,0 +1,15 @@
+[package]
+name = "cfile"
+version = "0.1.0"
+authors = ["Flier Lu <flier.lu@gmail.com>"]
+description = "Rust bindings to C FILE"
+repository = "https://github.com/flier/rust-cfile"
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
+libc = "0.2"
+
+[lib]
+name = "cfile"
+path = "src/lib.rs"
