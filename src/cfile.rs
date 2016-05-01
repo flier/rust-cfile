@@ -13,6 +13,32 @@ use std::os::unix::ffi::OsStrExt;
 
 use libc;
 
+pub trait Stream : io::Read + io::Write + io::Seek {
+    /// returns the raw pointer of the stream
+    fn stream(&self) -> *mut libc::FILE;
+
+    /// returns the current position of the stream.
+    fn position(&self) -> io::Result<u64>;
+
+    /// tests the end-of-file indicator for the stream
+    fn eof(&self) -> bool;
+
+    /// tests the error indicator for the stream
+    fn errno(&self) -> i32;
+
+    /// get the last error of the stream
+    fn last_error(&self) -> Option<io::Error>;
+
+    /// clears the end-of-file and error indicators for the stream
+    fn clear_error(&self);
+
+    /// returns the file name of the stream
+    fn file_name(&self) -> io::Result<PathBuf>;
+
+    /// Queries metadata about the underlying file.
+    fn metadata(&self) -> io::Result<Metadata>;
+}
+
 macro_rules! cstr {
     ($s:expr) => (try!(CString::new($s)).as_ptr() as *const i8)
 }
@@ -127,6 +153,13 @@ impl CFile {
         Self::from_raw(unsafe { libc::tmpfile() }, true)
     }
 
+    /// opens a stream that permits the access specified by mode.
+    pub fn open_mem(buf: &[u8], mode: &str) -> io::Result<CFile> {
+        let f = unsafe { fmemopen(buf.as_ptr() as *mut libc::c_void, buf.len(), cstr!(mode)) };
+
+        Self::from_raw(f, true)
+    }
+
     /// opens the file whose name is the string pointed to by `filename`
     /// and associates the stream pointed to by stream with it.
     ///
@@ -137,14 +170,15 @@ impl CFile {
         Self::from_raw(unsafe { libc::freopen(cstr!(filename), cstr!(mode), self.stream()) },
                        true)
     }
+}
 
-    /// returns the raw pointer of the stream
-    pub fn stream(&self) -> *mut libc::FILE {
+impl Stream for CFile {
+    #[inline]
+    fn stream(&self) -> *mut libc::FILE {
         (*self.inner.borrow()).0
     }
 
-    /// returns the current position of the stream.
-    pub fn position(&self) -> io::Result<u64> {
+    fn position(&self) -> io::Result<u64> {
         let off = unsafe { libc::ftell(self.stream()) };
 
         if off < 0 {
@@ -156,20 +190,17 @@ impl CFile {
         Ok(off as u64)
     }
 
-    /// tests the end-of-file indicator for the stream
     #[inline]
-    pub fn eof(&self) -> bool {
+    fn eof(&self) -> bool {
         unsafe { libc::feof(self.stream()) != 0 }
     }
 
-    /// tests the error indicator for the stream
     #[inline]
-    pub fn errno(&self) -> i32 {
+    fn errno(&self) -> i32 {
         unsafe { libc::ferror(self.stream()) }
     }
 
-    /// get the last error of the stream
-    pub fn last_error(&self) -> Option<io::Error> {
+    fn last_error(&self) -> Option<io::Error> {
         let errno = self.errno();
 
         if errno != 0 {
@@ -184,14 +215,12 @@ impl CFile {
         }
     }
 
-    /// clears the end-of-file and error indicators for the stream
-    pub fn clear_error(&self) {
+    fn clear_error(&self) {
         unsafe { clearerr(self.stream()) }
     }
 
-    /// returns the file name of the stream
     #[cfg(target_os = "linux")]
-    pub fn file_name(&self) -> io::Result<PathBuf> {
+    fn file_name(&self) -> io::Result<PathBuf> {
         let s = format!("/proc/self/fd/{}", self.as_raw_fd());
         let p = Path::new(&s);
 
@@ -202,9 +231,8 @@ impl CFile {
         }
     }
 
-    /// returns the file name of the stream
     #[cfg(target_os = "macos")]
-    pub fn file_name(&self) -> io::Result<PathBuf> {
+    fn file_name(&self) -> io::Result<PathBuf> {
         let mut buf = Vec::with_capacity(libc::PATH_MAX as usize);
 
         let ret = unsafe { libc::fcntl(self.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr()) };
@@ -220,8 +248,7 @@ impl CFile {
         }
     }
 
-    /// Queries metadata about the underlying file.
-    pub fn metadata(&self) -> io::Result<Metadata> {
+    fn metadata(&self) -> io::Result<Metadata> {
         try!(self.file_name()).as_path().metadata()
     }
 }
@@ -320,6 +347,13 @@ impl io::Seek for CFile {
 
 extern "C" {
     fn clearerr(file: *mut libc::FILE);
+
+    fn fmemopen(buf: *mut libc::c_void,
+                size: libc::size_t,
+                mode: *const libc::c_char)
+                -> *mut libc::FILE;
+
+    fn open_memstream(ptr: *mut *mut libc::c_void, sizeloc: *mut libc::size_t) -> *mut libc::FILE;
 
     fn flockfile(file: *mut libc::FILE);
 
