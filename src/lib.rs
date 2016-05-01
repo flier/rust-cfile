@@ -22,5 +22,7 @@
 extern crate libc;
 
 mod cfile;
+mod lock;
 
 pub use cfile::*;
+pub use lock::*;

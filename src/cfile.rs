@@ -8,12 +8,13 @@ use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::convert::AsRef;
 use std::mem::forget;
-use std::ops::Drop;
+use std::ops::{Deref, Drop};
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 
 use libc;
 
+/// C *FILE stream
 pub trait Stream : io::Read + io::Write + io::Seek {
     /// returns the raw pointer of the stream
     fn stream(&self) -> *mut libc::FILE;
@@ -52,7 +53,7 @@ macro_rules! cstr {
     ($s:expr) => (try!(CString::new($s)).as_ptr() as *const i8)
 }
 
-struct CFileRaw(*mut libc::FILE);
+pub struct CFileRaw(*mut libc::FILE);
 
 impl Drop for CFileRaw {
     fn drop(&mut self) {
@@ -62,6 +63,18 @@ impl Drop for CFileRaw {
     }
 }
 
+impl Deref for CFileRaw {
+    type Target = *mut libc::FILE;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+extern "C" {
+    fn clearerr(file: *mut libc::FILE);
+}
+
 /// A reference to an open stream on the filesystem.
 ///
 /// An instance of a `CFile` can be read and/or written depending on what modes it was opened with.
@@ -69,11 +82,19 @@ impl Drop for CFileRaw {
 ///
 pub struct CFile {
     inner: Arc<RefCell<CFileRaw>>,
-    pub owned: bool,
+    owned: bool,
 }
 
 unsafe impl Sync for CFile {}
 unsafe impl Send for CFile {}
+
+impl Deref for CFile {
+    type Target = Arc<RefCell<CFileRaw>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
 
 impl CFile {
     /// Constructs a `CFile` from a raw pointer.
@@ -165,13 +186,6 @@ impl CFile {
         Self::from_raw(unsafe { libc::tmpfile() }, true)
     }
 
-    /// opens a stream that permits the access specified by mode.
-    pub fn open_mem(buf: &[u8], mode: &str) -> io::Result<CFile> {
-        let f = unsafe { fmemopen(buf.as_ptr() as *mut libc::c_void, buf.len(), cstr!(mode)) };
-
-        Self::from_raw(f, true)
-    }
-
     /// opens the file whose name is the string pointed to by `filename`
     /// and associates the stream pointed to by stream with it.
     ///
@@ -179,8 +193,9 @@ impl CFile {
     /// The mode argument is used just as in the `open()` function.
     ///
     pub fn reopen(&self, filename: &str, mode: &str) -> io::Result<CFile> {
-        Self::from_raw(unsafe { libc::freopen(cstr!(filename), cstr!(mode), self.stream()) },
-                       true)
+        let f = unsafe { libc::freopen(cstr!(filename), cstr!(mode), self.stream()) };
+
+        Self::from_raw(f, true)
     }
 }
 
@@ -360,95 +375,6 @@ impl io::Seek for CFile {
 impl fmt::Debug for CFile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "CFile {{f: {:p}, owned: {}}}", self.stream(), self.owned)
-    }
-}
-
-extern "C" {
-    fn clearerr(file: *mut libc::FILE);
-
-    fn fmemopen(buf: *mut libc::c_void,
-                size: libc::size_t,
-                mode: *const libc::c_char)
-                -> *mut libc::FILE;
-
-    fn open_memstream(ptr: *mut *mut libc::c_void, sizeloc: *mut libc::size_t) -> *mut libc::FILE;
-
-    fn flockfile(file: *mut libc::FILE);
-
-    fn ftrylockfile(file: *mut libc::FILE) -> i32;
-
-    fn funlockfile(file: *mut libc::FILE);
-}
-
-/// A locked reference to the CFile stream.
-pub struct FileLock(Arc<RefCell<CFileRaw>>);
-
-impl Drop for FileLock {
-    fn drop(&mut self) {
-        unsafe { funlockfile(self.0.borrow().0) }
-    }
-}
-
-/// Extension methods for `CFile` lock.
-pub trait FileLockExt {
-    /// acquires an exclusive lock on the specified object.
-    ///
-    /// If another thread has already locked the object,
-    /// will block until the lock is released.
-    ///
-    /// # Examples
-    /// ```
-    /// use std::io::Write;
-    /// use cfile::{CFile, FileLockExt};
-    ///
-    /// let mut f = CFile::open_tmpfile().unwrap();
-    /// let l = f.lock();
-    ///
-    /// assert_eq!(f.write(b"test").unwrap(), 4);
-    /// ```
-    fn lock(&self) -> FileLock;
-
-    /// a non-blocking version of `lock()`;
-    ///
-    /// if the lock cannot be acquired immediately,
-    /// `try_lock()` returns `None` instead of blocking.
-    ///
-    /// # Examples
-    /// ```
-    /// use std::io::Write;
-    /// use cfile::{CFile, FileLockExt};
-    ///
-    /// let mut f = CFile::open_tmpfile().unwrap();
-    ///
-    /// if let Some(l) = f.try_lock() {
-    ///     assert_eq!(f.write(b"test").unwrap(), 4);
-    /// }
-    /// ```
-    fn try_lock(&self) -> Option<FileLock>;
-
-    /// releases the lock on an object acquired
-    /// by an earlier call to lock() or try_lock().
-    ///
-    fn unlock(&self);
-}
-
-impl<'a> FileLockExt for CFile {
-    fn lock(&self) -> FileLock {
-        unsafe { flockfile(self.stream()) }
-
-        FileLock(self.inner.clone())
-    }
-
-    fn try_lock(&self) -> Option<FileLock> {
-        if unsafe { ftrylockfile(self.stream()) } == 0 {
-            Some(FileLock(self.inner.clone()))
-        } else {
-            None
-        }
-    }
-
-    fn unlock(&self) {
-        unsafe { funlockfile(self.stream()) }
     }
 }
 
