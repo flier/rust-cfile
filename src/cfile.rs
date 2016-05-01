@@ -41,7 +41,7 @@ pub trait Stream : io::Read + io::Write + io::Seek {
 }
 
 pub trait ToStream : AsRawFd + Sized {
-    fn open_stream(&self, mode: &str) -> io::Result<CFile> {
+    fn to_stream(&self, mode: &str) -> io::Result<CFile> {
         CFile::open_stream(self, mode)
     }
 }
@@ -100,7 +100,7 @@ impl CFile {
     ///
     /// * `r+`  Open for reading and writing.  The stream is positioned at the
     ///         beginning of the file.
-    ///
+    ///         
     /// * `w`     Truncate to zero length or create text file for writing.  The
     ///         stream is positioned at the beginning of the file.
     ///
