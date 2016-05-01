@@ -1,5 +1,6 @@
 use std::io;
 use std::str;
+use std::fmt;
 use std::sync::Arc;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
@@ -39,6 +40,14 @@ pub trait Stream : io::Read + io::Write + io::Seek {
     fn metadata(&self) -> io::Result<Metadata>;
 }
 
+pub trait ToStream : AsRawFd + Sized {
+    fn open_stream(&self, mode: &str) -> io::Result<CFile> {
+        CFile::open_stream(self, mode)
+    }
+}
+
+impl<S: AsRawFd + Sized> ToStream for S {}
+
 macro_rules! cstr {
     ($s:expr) => (try!(CString::new($s)).as_ptr() as *const i8)
 }
@@ -62,6 +71,9 @@ pub struct CFile {
     inner: Arc<RefCell<CFileRaw>>,
     pub owned: bool,
 }
+
+unsafe impl Sync for CFile {}
+unsafe impl Send for CFile {}
 
 impl CFile {
     /// Constructs a `CFile` from a raw pointer.
@@ -342,6 +354,12 @@ impl io::Seek for CFile {
         }
 
         self.position()
+    }
+}
+
+impl fmt::Debug for CFile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CFile {{f: {:p}, owned: {}}}", self.stream(), self.owned)
     }
 }
 
