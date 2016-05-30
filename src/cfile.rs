@@ -48,9 +48,13 @@ macro_rules! cstr {
     ($s:expr) => (try!(CString::new($s)).as_ptr() as *const i8)
 }
 
-pub struct CFileRaw(*mut libc::FILE);
+/// Raw C *FILE stream.
+pub type RawFilePtr = *mut libc::FILE;
 
-impl Drop for CFileRaw {
+/// Raw file stream.
+pub struct RawFile(RawFilePtr);
+
+impl Drop for RawFile {
     fn drop(&mut self) {
         unsafe {
             libc::fclose(self.0);
@@ -58,7 +62,7 @@ impl Drop for CFileRaw {
     }
 }
 
-impl Deref for CFileRaw {
+impl Deref for RawFile {
     type Target = libc::FILE;
 
     fn deref(&self) -> &Self::Target {
@@ -66,21 +70,21 @@ impl Deref for CFileRaw {
     }
 }
 
-impl DerefMut for CFileRaw {
+impl DerefMut for RawFile {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.0 }
     }
 }
 
-impl CFileRaw {
+impl RawFile {
     /// returns the raw pointer of the stream
-    pub fn stream(&self) -> *mut libc::FILE {
+    pub fn stream(&self) -> RawFilePtr {
         self.0
     }
 }
 
 extern "C" {
-    fn clearerr(file: *mut libc::FILE);
+    fn clearerr(file: RawFilePtr);
 }
 
 /// A reference to an open stream on the filesystem.
@@ -89,7 +93,7 @@ extern "C" {
 /// `CFile` also implement `Seek` to alter the logical cursor that the file contains internally.
 ///
 pub struct CFile {
-    inner: CFileRaw,
+    inner: RawFile,
     owned: bool,
 }
 
@@ -97,7 +101,7 @@ unsafe impl Sync for CFile {}
 unsafe impl Send for CFile {}
 
 impl Deref for CFile {
-    type Target = CFileRaw;
+    type Target = RawFile;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -117,7 +121,7 @@ impl CFile {
             Err(io::Error::last_os_error())
         } else {
             Ok(CFile {
-                inner: CFileRaw(f),
+                inner: RawFile(f),
                 owned: owned,
             })
         }

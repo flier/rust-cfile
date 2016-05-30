@@ -1,8 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use libc;
-
-use cfile::CFile;
+use cfile::{RawFilePtr, CFile};
 
 /// A locked reference to the CFile stream.
 pub struct FileLock<'a>(&'a mut CFile);
@@ -78,11 +76,11 @@ pub trait FileLockExt {
 }
 
 extern "C" {
-    fn flockfile(file: *mut libc::FILE);
+    fn flockfile(file: RawFilePtr);
 
-    fn ftrylockfile(file: *mut libc::FILE) -> i32;
+    fn ftrylockfile(file: RawFilePtr) -> i32;
 
-    fn funlockfile(file: *mut libc::FILE);
+    fn funlockfile(file: RawFilePtr);
 }
 
 impl<'a> FileLockExt for CFile {
