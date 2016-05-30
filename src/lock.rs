@@ -1,16 +1,29 @@
-use std::sync::Arc;
-use std::cell::RefCell;
+use std::ops::{Deref, DerefMut};
 
 use libc;
 
-use cfile::{Stream, CFileRaw, CFile};
+use cfile::CFile;
 
 /// A locked reference to the CFile stream.
-pub struct FileLock(Arc<RefCell<CFileRaw>>);
+pub struct FileLock<'a>(&'a mut CFile);
 
-impl Drop for FileLock {
+impl<'a> Drop for FileLock<'a> {
     fn drop(&mut self) {
-        unsafe { funlockfile(**self.0.borrow()) }
+        unsafe { funlockfile(self.0.stream()) }
+    }
+}
+
+impl<'a> Deref for FileLock<'a> {
+    type Target = CFile;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'a> DerefMut for FileLock<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
     }
 }
 
@@ -24,14 +37,14 @@ pub trait FileLockExt {
     /// # Examples
     /// ```
     /// use std::io::Write;
-    /// use cfile::{CFile, FileLockExt};
+    /// use cfile::{tmpfile, FileLockExt};
     ///
-    /// let mut f = CFile::open_tmpfile().unwrap();
-    /// let l = f.lock();
+    /// let mut f = tmpfile().unwrap();
+    /// let mut l = f.lock();
     ///
-    /// assert_eq!(f.write(b"test").unwrap(), 4);
+    /// assert_eq!(l.write(b"test").unwrap(), 4);
     /// ```
-    fn lock(&self) -> FileLock;
+    fn lock(&mut self) -> FileLock;
 
     /// a non-blocking version of `lock()`;
     ///
@@ -40,16 +53,23 @@ pub trait FileLockExt {
     ///
     /// # Examples
     /// ```
-    /// use std::io::Write;
-    /// use cfile::{CFile, FileLockExt};
+    /// use std::io::{Read, Write, BufRead, BufReader, Seek, SeekFrom};
+    /// use cfile::{tmpfile, FileLockExt};
     ///
-    /// let mut f = CFile::open_tmpfile().unwrap();
+    /// let mut f = tmpfile().unwrap();
     ///
-    /// if let Some(l) = f.try_lock() {
-    ///     assert_eq!(f.write(b"test").unwrap(), 4);
+    /// if let Some(mut c) = f.try_lock() {
+    ///     assert_eq!(c.write(b"test").unwrap(), 4);
     /// }
+    ///
+    /// assert_eq!(f.seek(SeekFrom::Start(0)).unwrap(), 0); // seek to the beginning of stream
+    ///
+    /// let mut r = BufReader::new(f);
+    /// let mut s = String::new();
+    /// assert_eq!(r.read_line(&mut s).unwrap(), 4); // read back the text
+    /// assert_eq!(s, "test");
     /// ```
-    fn try_lock(&self) -> Option<FileLock>;
+    fn try_lock(&mut self) -> Option<FileLock>;
 
     /// releases the lock on an object acquired
     /// by an earlier call to lock() or try_lock().
@@ -66,15 +86,15 @@ extern "C" {
 }
 
 impl<'a> FileLockExt for CFile {
-    fn lock(&self) -> FileLock {
+    fn lock(&mut self) -> FileLock {
         unsafe { flockfile(self.stream()) }
 
-        FileLock((*self).clone())
+        FileLock(self)
     }
 
-    fn try_lock(&self) -> Option<FileLock> {
+    fn try_lock(&mut self) -> Option<FileLock> {
         if unsafe { ftrylockfile(self.stream()) } == 0 {
-            Some(FileLock((*self).clone()))
+            Some(FileLock(self))
         } else {
             None
         }

@@ -3,9 +3,9 @@
 //! ```
 //! use std::io::prelude::*;
 //! use std::io::{BufReader, SeekFrom};
-//! use cfile::CFile;
+//! use cfile::tmpfile;
 //!
-//! let mut f = CFile::open_tmpfile().unwrap(); // open a tempfile
+//! let mut f = tmpfile().unwrap(); // open a tempfile
 //!
 //! assert_eq!(f.write(b"test").unwrap(), 4); // write something to the stream
 //!
