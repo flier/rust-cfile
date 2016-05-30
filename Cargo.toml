@@ -4,6 +4,7 @@ version = "0.2.1"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 description = "Rust bindings to C FILE"
 repository = "https://github.com/flier/rust-cfile"
+documentation = "http://flier.github.io/rust-cfile/release/0.2/cfile/"
 readme = "README.md"
 license = "MIT"
 
