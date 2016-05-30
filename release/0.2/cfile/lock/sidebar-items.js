@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["FileLock","A locked reference to the CFile stream."]],"trait":[["FileLockExt","Extension methods for `CFile` lock."]]});
