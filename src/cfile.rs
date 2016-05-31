@@ -67,6 +67,15 @@ impl Drop for RawFile {
     }
 }
 
+impl Clone for RawFile {
+    fn clone(&self) -> Self {
+        match self {
+            &RawFile::Owned(f) |
+            &RawFile::Borrowed(f) => RawFile::Borrowed(f),
+        }
+    }
+}
+
 impl Deref for RawFile {
     type Target = libc::FILE;
 
@@ -100,6 +109,7 @@ extern "C" {
 /// An instance of a `CFile` can be read and/or written depending on what modes it was opened with.
 /// `CFile` also implement `Seek` to alter the logical cursor that the file contains internally.
 ///
+#[derive(Clone)]
 pub struct CFile {
     inner: RawFile,
 }
