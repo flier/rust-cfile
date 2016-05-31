@@ -52,12 +52,17 @@ macro_rules! cstr {
 pub type RawFilePtr = *mut libc::FILE;
 
 /// Raw file stream.
-pub struct RawFile(RawFilePtr);
+pub enum RawFile {
+    Owned(RawFilePtr),
+    Borrowed(RawFilePtr),
+}
 
 impl Drop for RawFile {
     fn drop(&mut self) {
-        unsafe {
-            libc::fclose(self.0);
+        if let &mut RawFile::Owned(f) = self {
+            unsafe {
+                libc::fclose(f);
+            }
         }
     }
 }
@@ -66,20 +71,23 @@ impl Deref for RawFile {
     type Target = libc::FILE;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.0 }
+        unsafe { &*self.stream() }
     }
 }
 
 impl DerefMut for RawFile {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.0 }
+        unsafe { &mut *self.stream() }
     }
 }
 
 impl RawFile {
     /// returns the raw pointer of the stream
     pub fn stream(&self) -> RawFilePtr {
-        self.0
+        match self {
+            &RawFile::Owned(f) |
+            &RawFile::Borrowed(f) => f,
+        }
     }
 }
 
@@ -94,7 +102,6 @@ extern "C" {
 ///
 pub struct CFile {
     inner: RawFile,
-    owned: bool,
 }
 
 unsafe impl Sync for CFile {}
@@ -121,8 +128,11 @@ impl CFile {
             Err(io::Error::last_os_error())
         } else {
             Ok(CFile {
-                inner: RawFile(f),
-                owned: owned,
+                inner: if owned {
+                    RawFile::Owned(f)
+                } else {
+                    RawFile::Borrowed(f)
+                },
             })
         }
     }
@@ -388,7 +398,13 @@ impl io::Seek for CFile {
 
 impl fmt::Debug for CFile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CFile {{f: {:p}, owned: {}}}", self.stream(), self.owned)
+        write!(f,
+               "CFile {{f: {:p}, {}}}",
+               self.stream(),
+               match self.inner {
+                   RawFile::Owned(_) => "owned",
+                   RawFile::Borrowed(_) => "borrowed",
+               })
     }
 }
 
