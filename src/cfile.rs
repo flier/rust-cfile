@@ -138,7 +138,13 @@ impl CFile {
     }
 
     fn _open_fd(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
-        Self::from_raw(unsafe { libc::fdopen(fd, cstr!(mode)) }, owned)
+        Self::from_raw(unsafe { libc::fdopen(fd, cstr!(mode)) },
+                       match fd {
+                           libc::STDIN_FILENO |
+                           libc::STDOUT_FILENO |
+                           libc::STDERR_FILENO => false,
+                           _ => owned,
+                       })
     }
 
     /// opens the file whose name is the string pointed to by `filename`
