@@ -1,5 +1,6 @@
-#![cfg_attr(feature="clippy", feature(plugin))]
-
+#![cfg_attr(feature = "dev", allow(unstable_features))]
+#![cfg_attr(feature = "dev", feature(plugin))]
+#![cfg_attr(feature = "dev", plugin(clippy))]
 
 //! # Examples
 //!
@@ -31,10 +32,10 @@
 
 extern crate libc;
 
-pub use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 
 mod cfile;
 mod lock;
 
-pub use cfile::{Stream, ToStream, CFile, open, tmpfile, stdin, stdout, stderr};
-pub use lock::{FileLockExt, FileLock};
+pub use cfile::{CFile, Stream, ToStream, open, stderr, stdin, stdout, tmpfile};
+pub use lock::{FileLock, FileLockExt};

@@ -1,6 +1,6 @@
 [package]
 name = "cfile"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 description = "Rust bindings to C FILE"
 repository = "https://github.com/flier/rust-cfile"
@@ -15,6 +15,7 @@ clippy = {version = "*", optional = true}
 
 [features]
 default=[]
+dev = ["clippy"]
 
 [lib]
 name = "cfile"
