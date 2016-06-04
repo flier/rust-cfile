@@ -447,7 +447,7 @@ impl fmt::Debug for CFile {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write, Seek, SeekFrom};
+    use std::io::{Read, Seek, SeekFrom, Write};
     use std::os::unix::io::AsRawFd;
 
     use super::*;

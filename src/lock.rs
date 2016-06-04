@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use cfile::{RawFilePtr, CFile};
+use cfile::{CFile, RawFilePtr};
 
 /// A locked reference to the `CFile` stream.
 pub struct FileLock<'a>(&'a mut CFile);
