@@ -36,7 +36,9 @@ pub trait Stream: io::Read + io::Write + io::Seek {
     fn metadata(&self) -> io::Result<Metadata>;
 }
 
+/// A trait for converting a value to a stream.
 pub trait ToStream: AsRawFd + Sized {
+    /// open a raw fd as C *FILE stream
     fn to_stream(&self, mode: &str) -> io::Result<CFile> {
         open_stream(self, mode)
     }
@@ -59,7 +61,7 @@ pub enum RawFile {
 
 impl Drop for RawFile {
     fn drop(&mut self) {
-        if let &mut RawFile::Owned(f) = self {
+        if let RawFile::Owned(f) = *self {
             unsafe {
                 libc::fclose(f);
             }
@@ -69,9 +71,9 @@ impl Drop for RawFile {
 
 impl Clone for RawFile {
     fn clone(&self) -> Self {
-        match self {
-            &RawFile::Owned(f) |
-            &RawFile::Borrowed(f) => RawFile::Borrowed(f),
+        match *self {
+            RawFile::Owned(f) |
+            RawFile::Borrowed(f) => RawFile::Borrowed(f),
         }
     }
 }
@@ -90,12 +92,36 @@ impl DerefMut for RawFile {
     }
 }
 
+
+impl AsRawFd for RawFile {
+    fn as_raw_fd(&self) -> RawFd {
+        unsafe { libc::fileno(self.stream()) }
+    }
+}
+
+impl IntoRawFd for RawFile {
+    fn into_raw_fd(self) -> RawFd {
+        let fd = unsafe { libc::fileno(self.stream()) };
+
+        forget(self);
+
+        fd
+    }
+}
+
 impl RawFile {
     /// returns the raw pointer of the stream
     pub fn stream(&self) -> RawFilePtr {
-        match self {
-            &RawFile::Owned(f) |
-            &RawFile::Borrowed(f) => f,
+        match *self {
+            RawFile::Owned(f) |
+            RawFile::Borrowed(f) => f,
+        }
+    }
+
+    pub fn owned(&self) -> bool {
+        match *self {
+            RawFile::Owned(_) => true,
+            RawFile::Borrowed(_) => false,
         }
     }
 }
@@ -217,6 +243,17 @@ pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
 }
 
 /// open stdin as a read only stream
+///
+/// ```
+/// use std::os::unix::io::AsRawFd;
+///
+/// use cfile;
+///
+/// let stdin = cfile::stdin().unwrap();
+///
+/// assert!(!stdin.owned());
+/// assert_eq!(stdin.as_raw_fd(), cfile::STDIN_FILENO);
+/// ```
 pub fn stdin() -> io::Result<CFile> {
     CFile::_open_fd(libc::STDIN_FILENO, "r", false)
 }
@@ -317,22 +354,6 @@ impl Stream for CFile {
 
     fn metadata(&self) -> io::Result<Metadata> {
         try!(self.file_name()).as_path().metadata()
-    }
-}
-
-impl AsRawFd for CFile {
-    fn as_raw_fd(&self) -> RawFd {
-        unsafe { libc::fileno(self.stream()) }
-    }
-}
-
-impl IntoRawFd for CFile {
-    fn into_raw_fd(self) -> RawFd {
-        let fd = unsafe { libc::fileno(self.stream()) };
-
-        forget(self);
-
-        fd
     }
 }
 

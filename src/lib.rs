@@ -1,3 +1,6 @@
+#![cfg_attr(feature="clippy", feature(plugin))]
+
+
 //! # Examples
 //!
 //! ```
@@ -28,8 +31,10 @@
 
 extern crate libc;
 
+pub use libc::{STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+
 mod cfile;
 mod lock;
 
-pub use cfile::*;
-pub use lock::*;
+pub use cfile::{Stream, ToStream, CFile, open, tmpfile, stdin, stdout, stderr};
+pub use lock::{FileLockExt, FileLock};

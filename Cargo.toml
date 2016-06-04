@@ -11,6 +11,11 @@ license = "MIT"
 [dependencies]
 libc = "0.2"
 
+clippy = {version = "*", optional = true}
+
+[features]
+default=[]
+
 [lib]
 name = "cfile"
 path = "src/lib.rs"

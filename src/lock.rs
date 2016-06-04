@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use cfile::{RawFilePtr, CFile};
 
-/// A locked reference to the CFile stream.
+/// A locked reference to the `CFile` stream.
 pub struct FileLock<'a>(&'a mut CFile);
 
 impl<'a> Drop for FileLock<'a> {
