@@ -21,10 +21,3 @@ after_failure:
 env:
   global:
     - RUST_BACKTRACE=1
-script:
-    - cargo build --verbose
-    - if [[ $TRAVIS_RUST_VERSION = nightly* ]]; then
-      cargo test --verbose --features dev
-    else
-      cargo test --verbose
-    fi
