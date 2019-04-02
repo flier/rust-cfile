@@ -65,7 +65,7 @@ impl<S: IntoRawFd + Sized> IntoStream for S {}
 
 macro_rules! cstr {
     ($s:expr) => {
-        try!(CString::new($s)).as_ptr() as *const i8
+        CString::new($s)?.as_ptr() as *const i8
     };
 }
 
@@ -378,7 +378,7 @@ impl Stream for CFile {
     }
 
     fn metadata(&self) -> io::Result<Metadata> {
-        try!(self.file_name()).as_path().metadata()
+        self.file_name()?.as_path().metadata()
     }
 
     fn read_slice<T: Sized>(&mut self, elements: &mut [T]) -> io::Result<usize> {

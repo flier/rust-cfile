@@ -25,13 +25,12 @@
 //! assert_eq!(r.read_line(&mut s).unwrap(), 4);
 //! assert_eq!(s, "test");
 //! ```
-
-extern crate libc;
-
 pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 
 mod cfile;
 mod lock;
 
-pub use cfile::{open, open_stream, stderr, stdin, stdout, tmpfile, CFile, Stream, ToStream};
-pub use lock::{FileLock, FileLockExt};
+pub use crate::cfile::{
+    open, open_stream, stderr, stdin, stdout, tmpfile, CFile, Stream, ToStream,
+};
+pub use crate::lock::{FileLock, FileLockExt};
