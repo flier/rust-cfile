@@ -10,6 +10,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::str;
+use std::sync::Arc;
 
 use libc;
 
@@ -72,26 +73,27 @@ macro_rules! cstr {
 /// Raw C *FILE stream.
 pub type RawFilePtr = *mut libc::FILE;
 
-/// Raw file stream.
-pub enum RawFile {
-    Owned(RawFilePtr),
-    Borrowed(RawFilePtr),
-}
+pub struct Owned(RawFilePtr);
 
-impl Drop for RawFile {
+impl Drop for Owned {
     fn drop(&mut self) {
-        if let RawFile::Owned(f) = *self {
-            unsafe {
-                libc::fclose(f);
-            }
+        unsafe {
+            libc::fclose(self.0);
         }
     }
 }
 
+/// Raw file stream.
+pub enum RawFile {
+    Owned(Arc<Owned>),
+    Borrowed(RawFilePtr),
+}
+
 impl Clone for RawFile {
     fn clone(&self) -> Self {
-        match *self {
-            RawFile::Owned(f) | RawFile::Borrowed(f) => RawFile::Borrowed(f),
+        match self {
+            RawFile::Owned(s) => RawFile::Owned(s.clone()),
+            RawFile::Borrowed(f) => RawFile::Borrowed(*f),
         }
     }
 }
@@ -129,8 +131,9 @@ impl IntoRawFd for RawFile {
 impl RawFile {
     /// returns the raw pointer of the stream
     pub fn stream(&self) -> RawFilePtr {
-        match *self {
-            RawFile::Owned(f) | RawFile::Borrowed(f) => f,
+        match self {
+            RawFile::Owned(s) => s.0,
+            RawFile::Borrowed(f) => *f,
         }
     }
 
@@ -181,7 +184,7 @@ impl CFile {
         } else {
             Ok(CFile {
                 inner: if owned {
-                    RawFile::Owned(f)
+                    RawFile::Owned(Arc::new(Owned(f)))
                 } else {
                     RawFile::Borrowed(f)
                 },
@@ -302,7 +305,7 @@ pub fn tmpfile() -> io::Result<CFile> {
 ///
 /// The mode of the stream must be compatible with the mode of the file descriptor.
 ///
-pub fn open_stream<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
+pub fn open_fd<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
     unsafe { CFile::open_fd(s.as_raw_fd(), mode, true) }
 }
 
