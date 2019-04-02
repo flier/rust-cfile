@@ -1,5 +1,4 @@
 use std::io;
-use std::iter::IntoIterator;
 
 use crate::cfile::CFile;
 
@@ -36,9 +35,12 @@ impl<'a> IntoIterator for &'a CFile {
 }
 
 /// An iterator over the lines of a *FILE stream.
-pub struct Lines<'a>(Bytes<'a>);
+pub struct Lines<T>(pub(crate) T);
 
-impl<'a> Iterator for Lines<'a> {
+impl<T> Iterator for Lines<T>
+where
+    T: Iterator<Item = io::Result<u8>>,
+{
     type Item = io::Result<String>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -66,7 +68,7 @@ impl CFile {
     }
 
     /// An iterator over the lines of a *FILE stream.
-    pub fn lines(&self) -> Lines {
+    pub fn lines(&self) -> Lines<Bytes> {
         Lines(Bytes(self))
     }
 }

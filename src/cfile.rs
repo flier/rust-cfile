@@ -1,10 +1,9 @@
 use std::convert::AsRef;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::fmt;
 use std::fs::Metadata;
 use std::io;
 use std::mem;
-use std::mem::forget;
 use std::ops::{Deref, DerefMut, Drop};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
@@ -116,7 +115,7 @@ impl IntoRawFd for RawFile {
     fn into_raw_fd(self) -> RawFd {
         let fd = self.as_raw_fd();
 
-        forget(self);
+        mem::forget(self);
 
         fd
     }
@@ -135,7 +134,7 @@ impl RawFile {
     pub fn into_raw(self) -> RawFilePtr {
         let f = self.as_raw();
 
-        forget(self);
+        mem::forget(self);
 
         f
     }
@@ -216,7 +215,7 @@ impl CFile {
                     },
                 )
             })
-            .ok_or_else(|| io::Error::last_os_error())
+            .ok_or_else(io::Error::last_os_error)
     }
 
     /// opens the file whose name is the string pointed to by `filename`
@@ -229,7 +228,7 @@ impl CFile {
         unsafe {
             NonNull::new(libc::freopen(cstr!(filename), cstr!(mode), self.stream()))
                 .map(|f| Self::owned(f))
-                .ok_or_else(|| io::Error::last_os_error())
+                .ok_or_else(io::Error::last_os_error)
         }
     }
 }
@@ -277,7 +276,7 @@ pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
             cstr!(mode),
         ))
         .map(|f| CFile::owned(f))
-        .ok_or_else(|| io::Error::last_os_error())
+        .ok_or_else(io::Error::last_os_error)
     }
 }
 
@@ -312,7 +311,7 @@ pub fn tmpfile() -> io::Result<CFile> {
     unsafe {
         NonNull::new(libc::tmpfile())
             .map(|f| CFile::owned(f))
-            .ok_or_else(|| io::Error::last_os_error())
+            .ok_or_else(io::Error::last_os_error)
     }
 }
 
@@ -380,6 +379,8 @@ impl Stream for CFile {
 
     #[cfg(target_os = "macos")]
     fn file_name(&self) -> io::Result<PathBuf> {
+        use std::ffi::CStr;
+
         let mut buf = Vec::with_capacity(libc::PATH_MAX as usize);
 
         let ret = unsafe { libc::fcntl(self.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr()) };
@@ -499,7 +500,7 @@ impl fmt::Debug for CFile {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::io::{prelude::*, SeekFrom};
     use std::os::unix::io::AsRawFd;
 
     use super::*;

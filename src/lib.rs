@@ -30,6 +30,8 @@ pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 mod cfile;
 mod iter;
 mod lock;
+#[cfg(any(target_os = "linux", feature = "doc"))]
+pub mod unlocked;
 
 pub use crate::cfile::{
     fdopen, open, stderr, stdin, stdout, tmpfile, CFile, IntoStream, Stream, ToStream,
