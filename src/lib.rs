@@ -33,5 +33,5 @@ pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 mod cfile;
 mod lock;
 
-pub use cfile::{open, stderr, stdin, stdout, tmpfile, CFile, Stream, ToStream};
+pub use cfile::{open, open_stream, stderr, stdin, stdout, tmpfile, CFile, Stream, ToStream};
 pub use lock::{FileLock, FileLockExt};

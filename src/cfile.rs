@@ -3,6 +3,7 @@ use std::ffi::{CStr, CString};
 use std::fmt;
 use std::fs::Metadata;
 use std::io;
+use std::mem;
 use std::mem::forget;
 use std::ops::{Deref, DerefMut, Drop};
 use std::os::unix::ffi::OsStrExt;
@@ -34,17 +35,33 @@ pub trait Stream: io::Read + io::Write + io::Seek {
 
     /// Queries metadata about the underlying file.
     fn metadata(&self) -> io::Result<Metadata>;
+
+    /// Reads n elements of data, return the number of items read.
+    fn read_slice<T: Sized>(&mut self, elements: &mut [T]) -> io::Result<usize>;
+
+    /// Writes n elements of data, return the number of items written.
+    fn write_slice<T: Sized>(&mut self, elements: &[T]) -> io::Result<usize>;
 }
 
 /// A trait for converting a value to a stream.
 pub trait ToStream: AsRawFd + Sized {
-    /// open a raw fd as C *FILE stream
+    /// Open a raw fd as C *FILE stream
     fn to_stream(&self, mode: &str) -> io::Result<CFile> {
-        open_stream(self, mode)
+        unsafe { CFile::open_fd(self.as_raw_fd(), mode, true) }
     }
 }
 
 impl<S: AsRawFd + Sized> ToStream for S {}
+
+/// A trait to express the ability to consume an object and acquire ownership of its stream.
+pub trait IntoStream: IntoRawFd + Sized {
+    /// Consumes this raw fd, returning the raw underlying C *FILE stream.
+    fn into_stream(self, mode: &str) -> io::Result<CFile> {
+        unsafe { CFile::open_fd(self.into_raw_fd(), mode, true) }
+    }
+}
+
+impl<S: IntoRawFd + Sized> IntoStream for S {}
 
 macro_rules! cstr {
     ($s:expr) => {
@@ -363,19 +380,17 @@ impl Stream for CFile {
     fn metadata(&self) -> io::Result<Metadata> {
         try!(self.file_name()).as_path().metadata()
     }
-}
 
-impl io::Read for CFile {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if buf.is_empty() {
+    fn read_slice<T: Sized>(&mut self, elements: &mut [T]) -> io::Result<usize> {
+        if elements.is_empty() {
             return Ok(0);
         }
 
         let read = unsafe {
             libc::fread(
-                buf.as_ptr() as *mut libc::c_void,
-                1,
-                buf.len(),
+                elements.as_mut_ptr() as *mut libc::c_void,
+                mem::size_of::<T>(),
+                elements.len(),
                 self.stream(),
             )
         };
@@ -388,19 +403,17 @@ impl io::Read for CFile {
 
         Ok(read)
     }
-}
 
-impl io::Write for CFile {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if buf.is_empty() {
+    fn write_slice<T: Sized>(&mut self, elements: &[T]) -> io::Result<usize> {
+        if elements.is_empty() {
             return Ok(0);
         }
 
         let wrote = unsafe {
             libc::fwrite(
-                buf.as_ptr() as *const libc::c_void,
-                1,
-                buf.len(),
+                elements.as_ptr() as *const libc::c_void,
+                mem::size_of::<T>(),
+                elements.len(),
                 self.stream(),
             )
         };
@@ -412,6 +425,18 @@ impl io::Write for CFile {
         }
 
         Ok(wrote)
+    }
+}
+
+impl io::Read for CFile {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.read_slice(buf)
+    }
+}
+
+impl io::Write for CFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.write_slice(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
