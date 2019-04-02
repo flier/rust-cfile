@@ -28,9 +28,11 @@
 pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 
 mod cfile;
+mod iter;
 mod lock;
 
 pub use crate::cfile::{
     open, open_fd, stderr, stdin, stdout, tmpfile, CFile, IntoStream, Stream, ToStream,
 };
+pub use crate::iter::{Bytes, Lines};
 pub use crate::lock::{FileLock, FileLockExt};
