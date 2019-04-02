@@ -1,7 +1,3 @@
-#![cfg_attr(feature = "dev", allow(unstable_features))]
-#![cfg_attr(feature = "dev", feature(plugin))]
-#![cfg_attr(feature = "dev", plugin(clippy))]
-
 //! # Examples
 //!
 //! ```
@@ -37,5 +33,5 @@ pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 mod cfile;
 mod lock;
 
-pub use cfile::{CFile, Stream, ToStream, open, stderr, stdin, stdout, tmpfile};
+pub use cfile::{open, stderr, stdin, stdout, tmpfile, CFile, Stream, ToStream};
 pub use lock::{FileLock, FileLockExt};

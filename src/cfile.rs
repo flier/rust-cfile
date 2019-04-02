@@ -1,14 +1,14 @@
-use std::io;
-use std::str;
-use std::fmt;
-use std::ffi::{CStr, CString};
-use std::fs::Metadata;
-use std::path::{Path, PathBuf};
 use std::convert::AsRef;
+use std::ffi::{CStr, CString};
+use std::fmt;
+use std::fs::Metadata;
+use std::io;
 use std::mem::forget;
 use std::ops::{Deref, DerefMut, Drop};
-use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
+use std::path::{Path, PathBuf};
+use std::str;
 
 use libc;
 
@@ -47,7 +47,9 @@ pub trait ToStream: AsRawFd + Sized {
 impl<S: AsRawFd + Sized> ToStream for S {}
 
 macro_rules! cstr {
-    ($s:expr) => (try!(CString::new($s)).as_ptr() as *const i8)
+    ($s:expr) => {
+        try!(CString::new($s)).as_ptr() as *const i8
+    };
 }
 
 /// Raw C *FILE stream.
@@ -72,8 +74,7 @@ impl Drop for RawFile {
 impl Clone for RawFile {
     fn clone(&self) -> Self {
         match *self {
-            RawFile::Owned(f) |
-            RawFile::Borrowed(f) => RawFile::Borrowed(f),
+            RawFile::Owned(f) | RawFile::Borrowed(f) => RawFile::Borrowed(f),
         }
     }
 }
@@ -91,7 +92,6 @@ impl DerefMut for RawFile {
         unsafe { &mut *self.stream() }
     }
 }
-
 
 impl AsRawFd for RawFile {
     fn as_raw_fd(&self) -> RawFd {
@@ -113,8 +113,7 @@ impl RawFile {
     /// returns the raw pointer of the stream
     pub fn stream(&self) -> RawFilePtr {
         match *self {
-            RawFile::Owned(f) |
-            RawFile::Borrowed(f) => f,
+            RawFile::Owned(f) | RawFile::Borrowed(f) => f,
         }
     }
 
@@ -159,7 +158,7 @@ impl DerefMut for CFile {
 
 impl CFile {
     /// Constructs a `CFile` from a raw pointer.
-    pub fn from_raw(f: *mut libc::FILE, owned: bool) -> io::Result<CFile> {
+    pub unsafe fn from_raw(f: *mut libc::FILE, owned: bool) -> io::Result<CFile> {
         if f.is_null() {
             Err(io::Error::last_os_error())
         } else {
@@ -173,14 +172,22 @@ impl CFile {
         }
     }
 
-    fn _open_fd(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
-        Self::from_raw(unsafe { libc::fdopen(fd, cstr!(mode)) },
-                       match fd {
-                           libc::STDIN_FILENO |
-                           libc::STDOUT_FILENO |
-                           libc::STDERR_FILENO => false,
-                           _ => owned,
-                       })
+    pub unsafe fn owned(f: *mut libc::FILE) -> io::Result<CFile> {
+        Self::from_raw(f, true)
+    }
+
+    pub unsafe fn borrowed(f: *mut libc::FILE) -> io::Result<CFile> {
+        Self::from_raw(f, false)
+    }
+
+    unsafe fn open_fd(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
+        Self::from_raw(
+            libc::fdopen(fd, cstr!(mode)),
+            match fd {
+                libc::STDIN_FILENO | libc::STDOUT_FILENO | libc::STDERR_FILENO => false,
+                _ => owned,
+            },
+        )
     }
 
     /// opens the file whose name is the string pointed to by `filename`
@@ -190,9 +197,11 @@ impl CFile {
     /// The mode argument is used just as in the `open()` function.
     ///
     pub fn reopen(&self, filename: &str, mode: &str) -> io::Result<CFile> {
-        let f = unsafe { libc::freopen(cstr!(filename), cstr!(mode), self.stream()) };
+        unsafe {
+            let f = libc::freopen(cstr!(filename), cstr!(mode), self.stream());
 
-        Self::from_raw(f, true)
+            Self::from_raw(f, true)
+        }
     }
 }
 
@@ -233,13 +242,12 @@ impl CFile {
 /// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
 ///
 pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
-    CFile::from_raw(unsafe {
-                        libc::fopen(cstr!(path.as_ref()
-                                        .as_os_str()
-                                        .as_bytes()),
-                                    cstr!(mode))
-                    },
-                    true)
+    unsafe {
+        CFile::owned(libc::fopen(
+            cstr!(path.as_ref().as_os_str().as_bytes()),
+            cstr!(mode),
+        ))
+    }
 }
 
 /// open stdin as a read only stream
@@ -255,22 +263,22 @@ pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
 /// assert_eq!(stdin.as_raw_fd(), cfile::STDIN_FILENO);
 /// ```
 pub fn stdin() -> io::Result<CFile> {
-    CFile::_open_fd(libc::STDIN_FILENO, "r", false)
+    unsafe { CFile::open_fd(libc::STDIN_FILENO, "r", false) }
 }
 
 /// open stdout as a write only stream
 pub fn stdout() -> io::Result<CFile> {
-    CFile::_open_fd(libc::STDOUT_FILENO, "w", false)
+    unsafe { CFile::open_fd(libc::STDOUT_FILENO, "w", false) }
 }
 
 /// open stderr as a write only stream
 pub fn stderr() -> io::Result<CFile> {
-    CFile::_open_fd(libc::STDERR_FILENO, "w", false)
+    unsafe { CFile::open_fd(libc::STDERR_FILENO, "w", false) }
 }
 
 /// open a temporary file as a read/write stream
 pub fn tmpfile() -> io::Result<CFile> {
-    CFile::from_raw(unsafe { libc::tmpfile() }, true)
+    unsafe { CFile::from_raw(libc::tmpfile(), true) }
 }
 
 /// associates a stream with the existing file descriptor.
@@ -278,7 +286,7 @@ pub fn tmpfile() -> io::Result<CFile> {
 /// The mode of the stream must be compatible with the mode of the file descriptor.
 ///
 pub fn open_stream<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
-    CFile::_open_fd(s.as_raw_fd(), mode, true)
+    unsafe { CFile::open_fd(s.as_raw_fd(), mode, true) }
 }
 
 impl Stream for CFile {
@@ -364,10 +372,12 @@ impl io::Read for CFile {
         }
 
         let read = unsafe {
-            libc::fread(buf.as_ptr() as *mut libc::c_void,
-                        1,
-                        buf.len(),
-                        self.stream())
+            libc::fread(
+                buf.as_ptr() as *mut libc::c_void,
+                1,
+                buf.len(),
+                self.stream(),
+            )
         };
 
         if let Some(err) = self.last_error() {
@@ -387,10 +397,12 @@ impl io::Write for CFile {
         }
 
         let wrote = unsafe {
-            libc::fwrite(buf.as_ptr() as *const libc::c_void,
-                         1,
-                         buf.len(),
-                         self.stream())
+            libc::fwrite(
+                buf.as_ptr() as *const libc::c_void,
+                1,
+                buf.len(),
+                self.stream(),
+            )
         };
 
         if let Some(err) = self.last_error() {
@@ -435,13 +447,10 @@ impl io::Seek for CFile {
 
 impl fmt::Debug for CFile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,
-               "CFile {{f: {:p}, {}}}",
-               self.stream(),
-               match self.inner {
-                   RawFile::Owned(_) => "owned",
-                   RawFile::Borrowed(_) => "borrowed",
-               })
+        match self.inner {
+            RawFile::Owned(_) => write!(f, "CFile(Owned({:p}))", self.stream()),
+            RawFile::Borrowed(_) => write!(f, "CFile(Borrowed({:p})", self.stream()),
+        }
     }
 }
 
