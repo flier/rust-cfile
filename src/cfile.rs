@@ -49,7 +49,7 @@ pub trait Stream: io::Read + io::Write + io::Seek {
 pub trait ToStream: AsRawFd + Sized {
     /// Open a raw fd as C *FILE stream
     fn to_stream(&self, mode: &str) -> io::Result<CFile> {
-        unsafe { CFile::open_fd(self.as_raw_fd(), mode, false) }
+        unsafe { CFile::fdopen(self.as_raw_fd(), mode, false) }
     }
 }
 
@@ -59,7 +59,7 @@ impl<S: AsRawFd + Sized> ToStream for S {}
 pub trait IntoStream: IntoRawFd + Sized {
     /// Consumes this raw fd, returning the raw underlying C *FILE stream.
     fn into_stream(self, mode: &str) -> io::Result<CFile> {
-        unsafe { CFile::open_fd(self.into_raw_fd(), mode, true) }
+        unsafe { CFile::fdopen(self.into_raw_fd(), mode, true) }
     }
 }
 
@@ -205,7 +205,7 @@ impl CFile {
         Self::from_raw(f, false)
     }
 
-    unsafe fn open_fd(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
+    unsafe fn fdopen(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
         NonNull::new(libc::fdopen(fd, cstr!(mode)))
             .map(|f| {
                 Self::from_raw(
@@ -294,17 +294,17 @@ pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
 /// assert_eq!(stdin.as_raw_fd(), cfile::STDIN_FILENO);
 /// ```
 pub fn stdin() -> io::Result<CFile> {
-    unsafe { CFile::open_fd(libc::STDIN_FILENO, "r", false) }
+    unsafe { CFile::fdopen(libc::STDIN_FILENO, "r", false) }
 }
 
 /// open stdout as a write only stream
 pub fn stdout() -> io::Result<CFile> {
-    unsafe { CFile::open_fd(libc::STDOUT_FILENO, "w", false) }
+    unsafe { CFile::fdopen(libc::STDOUT_FILENO, "w", false) }
 }
 
 /// open stderr as a write only stream
 pub fn stderr() -> io::Result<CFile> {
-    unsafe { CFile::open_fd(libc::STDERR_FILENO, "w", false) }
+    unsafe { CFile::fdopen(libc::STDERR_FILENO, "w", false) }
 }
 
 /// open a temporary file as a read/write stream
@@ -320,8 +320,8 @@ pub fn tmpfile() -> io::Result<CFile> {
 ///
 /// The mode of the stream must be compatible with the mode of the file descriptor.
 ///
-pub fn open_fd<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
-    unsafe { CFile::open_fd(s.as_raw_fd(), mode, true) }
+pub fn fdopen<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
+    unsafe { CFile::fdopen(s.as_raw_fd(), mode, true) }
 }
 
 impl Stream for CFile {
