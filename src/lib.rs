@@ -30,5 +30,7 @@ pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 mod cfile;
 mod lock;
 
-pub use crate::cfile::{open, open_fd, stderr, stdin, stdout, tmpfile, CFile, Stream, ToStream};
+pub use crate::cfile::{
+    open, open_fd, stderr, stdin, stdout, tmpfile, CFile, IntoStream, Stream, ToStream,
+};
 pub use crate::lock::{FileLock, FileLockExt};

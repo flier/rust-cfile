@@ -9,6 +9,7 @@ use std::ops::{Deref, DerefMut, Drop};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::path::{Path, PathBuf};
+use std::ptr::NonNull;
 use std::str;
 use std::sync::Arc;
 
@@ -44,11 +45,11 @@ pub trait Stream: io::Read + io::Write + io::Seek {
     fn write_slice<T: Sized>(&mut self, elements: &[T]) -> io::Result<usize>;
 }
 
-/// A trait for converting a value to a stream.
+/// A trait for converting a raw fd to a C *FILE stream.
 pub trait ToStream: AsRawFd + Sized {
     /// Open a raw fd as C *FILE stream
     fn to_stream(&self, mode: &str) -> io::Result<CFile> {
-        unsafe { CFile::open_fd(self.as_raw_fd(), mode, true) }
+        unsafe { CFile::open_fd(self.as_raw_fd(), mode, false) }
     }
 }
 
@@ -71,31 +72,24 @@ macro_rules! cstr {
 }
 
 /// Raw C *FILE stream.
-pub type RawFilePtr = *mut libc::FILE;
+pub type RawFilePtr = NonNull<libc::FILE>;
 
+#[derive(Debug)]
 pub struct Owned(RawFilePtr);
 
 impl Drop for Owned {
     fn drop(&mut self) {
         unsafe {
-            libc::fclose(self.0);
+            libc::fclose(self.0.as_ptr());
         }
     }
 }
 
 /// Raw file stream.
+#[derive(Clone, Debug)]
 pub enum RawFile {
     Owned(Arc<Owned>),
     Borrowed(RawFilePtr),
-}
-
-impl Clone for RawFile {
-    fn clone(&self) -> Self {
-        match self {
-            RawFile::Owned(s) => RawFile::Owned(s.clone()),
-            RawFile::Borrowed(f) => RawFile::Borrowed(*f),
-        }
-    }
 }
 
 impl Deref for RawFile {
@@ -120,7 +114,7 @@ impl AsRawFd for RawFile {
 
 impl IntoRawFd for RawFile {
     fn into_raw_fd(self) -> RawFd {
-        let fd = unsafe { libc::fileno(self.stream()) };
+        let fd = self.as_raw_fd();
 
         forget(self);
 
@@ -129,16 +123,31 @@ impl IntoRawFd for RawFile {
 }
 
 impl RawFile {
-    /// returns the raw pointer of the stream
-    pub fn stream(&self) -> RawFilePtr {
+    /// Extracts the raw *FILE stream.
+    pub fn as_raw(&self) -> RawFilePtr {
         match self {
             RawFile::Owned(s) => s.0,
             RawFile::Borrowed(f) => *f,
         }
     }
 
+    /// Consumes this object, returning the raw *FILE stream.
+    pub fn into_raw(self) -> RawFilePtr {
+        let f = self.as_raw();
+
+        forget(self);
+
+        f
+    }
+
+    /// Returns the raw pointer of the stream
+    pub fn stream(&self) -> *mut libc::FILE {
+        self.as_raw().as_ptr()
+    }
+
+    /// Check if it is already owned.
     pub fn owned(&self) -> bool {
-        match *self {
+        match self {
             RawFile::Owned(_) => true,
             RawFile::Borrowed(_) => false,
         }
@@ -146,7 +155,7 @@ impl RawFile {
 }
 
 extern "C" {
-    fn clearerr(file: RawFilePtr);
+    fn clearerr(file: *mut libc::FILE);
 }
 
 /// A reference to an open stream on the filesystem.
@@ -178,36 +187,36 @@ impl DerefMut for CFile {
 
 impl CFile {
     /// Constructs a `CFile` from a raw pointer.
-    pub unsafe fn from_raw(f: *mut libc::FILE, owned: bool) -> io::Result<CFile> {
-        if f.is_null() {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(CFile {
-                inner: if owned {
-                    RawFile::Owned(Arc::new(Owned(f)))
-                } else {
-                    RawFile::Borrowed(f)
-                },
-            })
+    pub unsafe fn from_raw(f: RawFilePtr, owned: bool) -> CFile {
+        CFile {
+            inner: if owned {
+                RawFile::Owned(Arc::new(Owned(f)))
+            } else {
+                RawFile::Borrowed(f)
+            },
         }
     }
 
-    pub unsafe fn owned(f: *mut libc::FILE) -> io::Result<CFile> {
+    pub unsafe fn owned(f: RawFilePtr) -> CFile {
         Self::from_raw(f, true)
     }
 
-    pub unsafe fn borrowed(f: *mut libc::FILE) -> io::Result<CFile> {
+    pub unsafe fn borrowed(f: RawFilePtr) -> CFile {
         Self::from_raw(f, false)
     }
 
     unsafe fn open_fd(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
-        Self::from_raw(
-            libc::fdopen(fd, cstr!(mode)),
-            match fd {
-                libc::STDIN_FILENO | libc::STDOUT_FILENO | libc::STDERR_FILENO => false,
-                _ => owned,
-            },
-        )
+        NonNull::new(libc::fdopen(fd, cstr!(mode)))
+            .map(|f| {
+                Self::from_raw(
+                    f,
+                    match fd {
+                        libc::STDIN_FILENO | libc::STDOUT_FILENO | libc::STDERR_FILENO => false,
+                        _ => owned,
+                    },
+                )
+            })
+            .ok_or_else(|| io::Error::last_os_error())
     }
 
     /// opens the file whose name is the string pointed to by `filename`
@@ -218,9 +227,9 @@ impl CFile {
     ///
     pub fn reopen(&self, filename: &str, mode: &str) -> io::Result<CFile> {
         unsafe {
-            let f = libc::freopen(cstr!(filename), cstr!(mode), self.stream());
-
-            Self::from_raw(f, true)
+            NonNull::new(libc::freopen(cstr!(filename), cstr!(mode), self.stream()))
+                .map(|f| Self::owned(f))
+                .ok_or_else(|| io::Error::last_os_error())
         }
     }
 }
@@ -263,10 +272,12 @@ impl CFile {
 ///
 pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
     unsafe {
-        CFile::owned(libc::fopen(
+        NonNull::new(libc::fopen(
             cstr!(path.as_ref().as_os_str().as_bytes()),
             cstr!(mode),
         ))
+        .map(|f| CFile::owned(f))
+        .ok_or_else(|| io::Error::last_os_error())
     }
 }
 
@@ -298,7 +309,11 @@ pub fn stderr() -> io::Result<CFile> {
 
 /// open a temporary file as a read/write stream
 pub fn tmpfile() -> io::Result<CFile> {
-    unsafe { CFile::from_raw(libc::tmpfile(), true) }
+    unsafe {
+        NonNull::new(libc::tmpfile())
+            .map(|f| CFile::owned(f))
+            .ok_or_else(|| io::Error::last_os_error())
+    }
 }
 
 /// associates a stream with the existing file descriptor.
@@ -493,7 +508,6 @@ mod tests {
     fn test_cfile() {
         let mut f = tmpfile().unwrap();
 
-        assert!(!f.stream().is_null());
         assert!(f.as_raw_fd() > 2);
 
         assert_eq!(f.write(b"test").unwrap(), 4);
