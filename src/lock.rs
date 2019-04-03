@@ -68,11 +68,6 @@ pub trait FileLockExt {
     /// assert_eq!(s, "test");
     /// ```
     fn try_lock(&mut self) -> Option<FileLock>;
-
-    /// releases the lock on an object acquired
-    /// by an earlier call to lock() or try_lock().
-    ///
-    fn unlock(&self);
 }
 
 extern "C" {
@@ -96,9 +91,5 @@ impl<'a> FileLockExt for CFile {
         } else {
             None
         }
-    }
-
-    fn unlock(&self) {
-        unsafe { funlockfile(self.stream()) }
     }
 }
