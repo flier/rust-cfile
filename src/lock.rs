@@ -25,8 +25,7 @@ impl<'a> DerefMut for FileLock<'a> {
     }
 }
 
-/// Extension methods for `CFile` lock.
-pub trait FileLockExt {
+impl CFile {
     /// acquires an exclusive lock on the specified object.
     ///
     /// If another thread has already locked the object,
@@ -35,14 +34,18 @@ pub trait FileLockExt {
     /// # Examples
     /// ```
     /// use std::io::Write;
-    /// use cfile::{tmpfile, FileLockExt};
+    /// use cfile::tmpfile;
     ///
     /// let mut f = tmpfile().unwrap();
     /// let mut l = f.lock();
     ///
     /// assert_eq!(l.write(b"test").unwrap(), 4);
     /// ```
-    fn lock(&mut self) -> FileLock;
+    pub fn lock(&mut self) -> FileLock {
+        unsafe { flockfile(self.stream()) }
+
+        FileLock(self)
+    }
 
     /// a non-blocking version of `lock()`;
     ///
@@ -52,7 +55,7 @@ pub trait FileLockExt {
     /// # Examples
     /// ```
     /// use std::io::{Read, Write, BufRead, BufReader, Seek, SeekFrom};
-    /// use cfile::{tmpfile, FileLockExt};
+    /// use cfile::tmpfile;
     ///
     /// let mut f = tmpfile().unwrap();
     ///
@@ -67,7 +70,13 @@ pub trait FileLockExt {
     /// assert_eq!(r.read_line(&mut s).unwrap(), 4); // read back the text
     /// assert_eq!(s, "test");
     /// ```
-    fn try_lock(&mut self) -> Option<FileLock>;
+    pub fn try_lock(&mut self) -> Option<FileLock> {
+        if unsafe { ftrylockfile(self.stream()) } == 0 {
+            Some(FileLock(self))
+        } else {
+            None
+        }
+    }
 }
 
 extern "C" {
@@ -76,20 +85,4 @@ extern "C" {
     fn ftrylockfile(file: *mut libc::FILE) -> i32;
 
     fn funlockfile(file: *mut libc::FILE);
-}
-
-impl<'a> FileLockExt for CFile {
-    fn lock(&mut self) -> FileLock {
-        unsafe { flockfile(self.stream()) }
-
-        FileLock(self)
-    }
-
-    fn try_lock(&mut self) -> Option<FileLock> {
-        if unsafe { ftrylockfile(self.stream()) } == 0 {
-            Some(FileLock(self))
-        } else {
-            None
-        }
-    }
 }

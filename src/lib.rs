@@ -37,4 +37,4 @@ pub use crate::cfile::{
     fdopen, open, stderr, stdin, stdout, tmpfile, CFile, IntoStream, Stream, ToStream,
 };
 pub use crate::iter::{Bytes, Lines};
-pub use crate::lock::{FileLock, FileLockExt};
+pub use crate::lock::FileLock;
