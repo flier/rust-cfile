@@ -5,12 +5,22 @@ use std::fs::Metadata;
 use std::io;
 use std::mem;
 use std::ops::{Deref, DerefMut, Drop};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
+use std::slice;
 use std::str;
 use std::sync::Arc;
+
+cfg_if! {
+    if #[cfg(unix)] {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
+    } else {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+        use std::os::windows::io::{AsRawHandle, IntoRawHandle, RawHandle};
+    }
+}
 
 use libc;
 
@@ -44,25 +54,49 @@ pub trait Stream: io::Read + io::Write + io::Seek {
     fn write_slice<T: Sized>(&mut self, elements: &[T]) -> io::Result<usize>;
 }
 
-/// A trait for converting a raw fd to a C *FILE stream.
-pub trait ToStream: AsRawFd + Sized {
-    /// Open a raw fd as C *FILE stream
-    fn to_stream(&self, mode: &str) -> io::Result<CFile> {
-        unsafe { CFile::fdopen(self.as_raw_fd(), mode, false) }
+cfg_if! {
+    if #[cfg(unix)] {
+        /// A trait for converting a raw fd to a C *FILE stream.
+        pub trait ToStream: AsRawFd + Sized {
+            /// Open a raw fd as C *FILE stream
+            fn to_stream(&self, mode: &str) -> io::Result<CFile> {
+                unsafe { CFile::fdopen(self.as_raw_fd(), mode, false) }
+            }
+        }
+
+        impl<S: AsRawFd + Sized> ToStream for S {}
+
+        /// A trait to express the ability to consume an object and acquire ownership of its stream.
+        pub trait IntoStream: IntoRawFd + Sized {
+            /// Consumes this raw fd, returning the raw underlying C *FILE stream.
+            fn into_stream(self, mode: &str) -> io::Result<CFile> {
+                unsafe { CFile::fdopen(self.into_raw_fd(), mode, true) }
+            }
+        }
+
+        impl<S: IntoRawFd + Sized> IntoStream for S {}
+    } else {
+        /// A trait for converting a raw fd to a C *FILE stream.
+        pub trait ToStream: AsRawHandle + Sized {
+            /// Open a raw fd as C *FILE stream
+            fn to_stream(&self, mode: &str) -> io::Result<CFile> {
+                unsafe { CFile::fdopen(self.as_raw_handle(), mode, false) }
+            }
+        }
+
+        impl<S: AsRawHandle + Sized> ToStream for S {}
+
+        /// A trait to express the ability to consume an object and acquire ownership of its stream.
+        pub trait IntoStream: IntoRawHandle + Sized {
+            /// Consumes this raw fd, returning the raw underlying C *FILE stream.
+            fn into_stream(self, mode: &str) -> io::Result<CFile> {
+                unsafe { CFile::fdopen(self.into_raw_handle(), mode, true) }
+            }
+        }
+
+        impl<S: IntoRawHandle + Sized> IntoStream for S {}
     }
 }
-
-impl<S: AsRawFd + Sized> ToStream for S {}
-
-/// A trait to express the ability to consume an object and acquire ownership of its stream.
-pub trait IntoStream: IntoRawFd + Sized {
-    /// Consumes this raw fd, returning the raw underlying C *FILE stream.
-    fn into_stream(self, mode: &str) -> io::Result<CFile> {
-        unsafe { CFile::fdopen(self.into_raw_fd(), mode, true) }
-    }
-}
-
-impl<S: IntoRawFd + Sized> IntoStream for S {}
 
 macro_rules! cstr {
     ($s:expr) => {
@@ -105,19 +139,39 @@ impl DerefMut for RawFile {
     }
 }
 
-impl AsRawFd for RawFile {
-    fn as_raw_fd(&self) -> RawFd {
-        unsafe { libc::fileno(self.stream()) }
-    }
-}
+cfg_if! {
+    if #[cfg(unix)] {
+        impl AsRawFd for RawFile {
+            fn as_raw_fd(&self) -> RawFd {
+                unsafe { libc::fileno(self.stream()) }
+            }
+        }
 
-impl IntoRawFd for RawFile {
-    fn into_raw_fd(self) -> RawFd {
-        let fd = self.as_raw_fd();
+        impl IntoRawFd for RawFile {
+            fn into_raw_fd(self) -> RawFd {
+                let fd = self.as_raw_fd();
 
-        mem::forget(self);
+                mem::forget(self);
 
-        fd
+                fd
+            }
+        }
+    } else {
+        impl AsRawHandle for RawFile {
+            fn as_raw_handle(&self) -> RawHandle {
+                unsafe { libc::get_osfhandle(libc::fileno(self.stream())) as RawHandle }
+            }
+        }
+
+        impl IntoRawHandle for RawFile {
+            fn into_raw_handle(self) -> RawHandle {
+                let handle = self.as_raw_handle();
+
+                mem::forget(self);
+
+                handle
+            }
+        }
     }
 }
 
@@ -204,20 +258,6 @@ impl CFile {
         Self::from_raw(f, false)
     }
 
-    unsafe fn fdopen(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
-        NonNull::new(libc::fdopen(fd, cstr!(mode)))
-            .map(|f| {
-                Self::from_raw(
-                    f,
-                    match fd {
-                        libc::STDIN_FILENO | libc::STDOUT_FILENO | libc::STDERR_FILENO => false,
-                        _ => owned,
-                    },
-                )
-            })
-            .ok_or_else(io::Error::last_os_error)
-    }
-
     /// opens the file whose name is the string pointed to by `filename`
     /// and associates the stream pointed to by stream with it.
     ///
@@ -229,6 +269,37 @@ impl CFile {
             NonNull::new(libc::freopen(cstr!(filename), cstr!(mode), self.stream()))
                 .map(|f| Self::owned(f))
                 .ok_or_else(io::Error::last_os_error)
+        }
+    }
+}
+
+cfg_if! {
+    if #[cfg(unix)] {
+        impl CFile {
+            unsafe fn fdopen(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
+                NonNull::new(libc::fdopen(fd, cstr!(mode)))
+                    .map(|f| {
+                        Self::from_raw(
+                            f,
+                            match fd {
+                                libc::STDIN_FILENO | libc::STDOUT_FILENO | libc::STDERR_FILENO => false,
+                                _ => owned,
+                            },
+                        )
+                    })
+                    .ok_or_else(io::Error::last_os_error)
+            }
+        }
+    } else {
+        impl CFile {
+            unsafe fn fdopen(handle: RawHandle, mode: &str, owned: bool) -> io::Result<CFile> {
+                let mut flags = 0;
+                let fd = libc::open_osfhandle(handle as isize, flags);
+
+                NonNull::new(libc::fdopen(fd, cstr!(mode)))
+                    .map(|f| Self::from_raw(f, owned))
+                    .ok_or_else(io::Error::last_os_error)
+            }
         }
     }
 }
@@ -269,41 +340,101 @@ impl CFile {
 /// strings described above.  This is strictly for compatibility with ISO/IEC
 /// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
 ///
-pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
-    unsafe {
-        NonNull::new(libc::fopen(
-            cstr!(path.as_ref().as_os_str().as_bytes()),
-            cstr!(mode),
-        ))
-        .map(|f| CFile::owned(f))
-        .ok_or_else(io::Error::last_os_error)
+cfg_if! {
+    if #[cfg(unix)] {
+        pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
+            unsafe {
+                NonNull::new(libc::fopen(
+                    cstr!(path.as_ref().as_os_str().as_bytes()),
+                    cstr!(mode),
+                ))
+                .map(|f| CFile::owned(f))
+                .ok_or_else(io::Error::last_os_error)
+            }
+        }
+    } else {
+        pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
+            let filename = path.as_ref().as_os_str().to_string_lossy().to_string();
+
+            unsafe {
+                NonNull::new(libc::fopen(
+                    cstr!(filename),
+                    cstr!(mode),
+                ))
+                .map(|f| CFile::owned(f))
+                .ok_or_else(io::Error::last_os_error)
+            }
+        }
     }
 }
 
-/// open stdin as a read only stream
-///
-/// ```
-/// use std::os::unix::io::AsRawFd;
-///
-/// use cfile;
-///
-/// let stdin = cfile::stdin().unwrap();
-///
-/// assert!(!stdin.owned());
-/// assert_eq!(stdin.as_raw_fd(), cfile::STDIN_FILENO);
-/// ```
-pub fn stdin() -> io::Result<CFile> {
-    unsafe { CFile::fdopen(libc::STDIN_FILENO, "r", false) }
-}
+cfg_if! {
+    if #[cfg(unix)] {
+        /// open stdin as a read only stream
+        ///
+        /// ```
+        /// use std::os::unix::io::AsRawFd;
+        ///
+        /// use cfile;
+        ///
+        /// let stdin = cfile::stdin().unwrap();
+        ///
+        /// assert!(!stdin.owned());
+        /// assert_eq!(stdin.as_raw_fd(), cfile::STDIN_FILENO);
+        /// ```
+        pub fn stdin() -> io::Result<CFile> {
+            unsafe { CFile::fdopen(libc::STDIN_FILENO, "r", false) }
+        }
 
-/// open stdout as a write only stream
-pub fn stdout() -> io::Result<CFile> {
-    unsafe { CFile::fdopen(libc::STDOUT_FILENO, "w", false) }
-}
+        /// open stdout as a write only stream
+        pub fn stdout() -> io::Result<CFile> {
+            unsafe { CFile::fdopen(libc::STDOUT_FILENO, "w", false) }
+        }
 
-/// open stderr as a write only stream
-pub fn stderr() -> io::Result<CFile> {
-    unsafe { CFile::fdopen(libc::STDERR_FILENO, "w", false) }
+        /// open stderr as a write only stream
+        pub fn stderr() -> io::Result<CFile> {
+            unsafe { CFile::fdopen(libc::STDERR_FILENO, "w", false) }
+        }
+    } else {
+        /// open stdin as a read only stream
+        pub fn stdin() -> io::Result<CFile> {
+            unsafe {
+                let h = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
+
+                if h == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                    Err(io::Error::last_os_error())
+                } else {
+                    CFile::fdopen(h as *mut _, "r", false)
+                }
+            }
+        }
+
+        /// open stdout as a write only stream
+        pub fn stdout() -> io::Result<CFile> {
+            unsafe {
+                let h = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
+
+                if h == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                    Err(io::Error::last_os_error())
+                } else {
+                    CFile::fdopen(h as *mut _, "w", false)
+                }
+            }
+        }
+
+        /// open stderr as a write only stream
+        pub fn stderr() -> io::Result<CFile> {
+            unsafe {
+                let h = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_ERROR_HANDLE);
+
+                if h == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                    Err(io::Error::last_os_error())
+                } else {
+                    CFile::fdopen(h as *mut _, "w", false)
+                }
+            }
+        }
+    }
 }
 
 /// open a temporary file as a read/write stream
@@ -315,12 +446,24 @@ pub fn tmpfile() -> io::Result<CFile> {
     }
 }
 
-/// associates a stream with the existing file descriptor.
-///
-/// The mode of the stream must be compatible with the mode of the file descriptor.
-///
-pub fn fdopen<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
-    unsafe { CFile::fdopen(s.as_raw_fd(), mode, true) }
+cfg_if! {
+    if #[cfg(unix)] {
+        /// associates a stream with the existing file descriptor.
+        ///
+        /// The mode of the stream must be compatible with the mode of the file descriptor.
+        ///
+        pub fn fdopen<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
+            unsafe { CFile::fdopen(s.as_raw_fd(), mode, true) }
+        }
+    } else {
+        /// associates a stream with the existing file descriptor.
+        ///
+        /// The mode of the stream must be compatible with the mode of the file descriptor.
+        ///
+        pub fn fdopen<S: AsRawHandle>(s: &S, mode: &str) -> io::Result<CFile> {
+            unsafe { CFile::fdopen(s.as_raw_handle(), mode, true) }
+        }
+    }
 }
 
 impl Stream for CFile {
@@ -393,6 +536,36 @@ impl Stream for CFile {
             Err(io::Error::last_os_error())
         } else {
             Ok(PathBuf::from(filename))
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn file_name(&self) -> io::Result<PathBuf> {
+        let wchar_size = mem::size_of::<winapi::um::winnt::WCHAR>();
+        let bufsize = mem::size_of::<winapi::um::fileapi::FILE_NAME_INFO>()
+            + winapi::shared::minwindef::MAX_PATH * wchar_size;
+        let mut buf = vec![0u8; bufsize];
+
+        unsafe {
+            if winapi::um::winbase::GetFileInformationByHandleEx(
+                self.as_raw_handle() as *mut _,
+                winapi::um::minwinbase::FileNameInfo,
+                buf.as_mut_ptr() as *mut _,
+                buf.len() as u32,
+            ) == 0
+            {
+                Err(io::Error::last_os_error())
+            } else {
+                let fi = NonNull::new_unchecked(buf.as_mut_ptr())
+                    .cast::<winapi::um::fileapi::FILE_NAME_INFO>();
+                let fi = fi.as_ref();
+                let filename = slice::from_raw_parts(
+                    fi.FileName.as_ptr(),
+                    fi.FileNameLength as usize / wchar_size,
+                );
+
+                Ok(PathBuf::from(OsString::from_wide(filename)))
+            }
         }
     }
 
@@ -469,13 +642,24 @@ impl io::Write for CFile {
     }
 }
 
+cfg_if! {
+    if #[cfg(unix)] {
+        use libc::fseek as fseek64;
+    } else {
+        extern "C" {
+            #[link_name = "_fseeki64"]
+            fn fseek64(file: *mut libc::FILE, offset: i64, origin: i32) -> i32;
+        }
+    }
+}
+
 impl io::Seek for CFile {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         let ret = unsafe {
             match pos {
-                io::SeekFrom::Start(off) => libc::fseek(self.stream(), off as i64, libc::SEEK_SET),
-                io::SeekFrom::End(off) => libc::fseek(self.stream(), off, libc::SEEK_END),
-                io::SeekFrom::Current(off) => libc::fseek(self.stream(), off, libc::SEEK_CUR),
+                io::SeekFrom::Start(off) => fseek64(self.stream(), off as i64, libc::SEEK_SET),
+                io::SeekFrom::End(off) => fseek64(self.stream(), off, libc::SEEK_END),
+                io::SeekFrom::Current(off) => fseek64(self.stream(), off, libc::SEEK_CUR),
             }
         };
 
@@ -501,15 +685,12 @@ impl fmt::Debug for CFile {
 #[cfg(test)]
 mod tests {
     use std::io::{prelude::*, SeekFrom};
-    use std::os::unix::io::AsRawFd;
 
     use super::*;
 
     #[test]
     fn test_cfile() {
         let mut f = tmpfile().unwrap();
-
-        assert!(f.as_raw_fd() > 2);
 
         assert_eq!(f.write(b"test").unwrap(), 4);
         assert_eq!(f.seek(SeekFrom::Current(0)).unwrap(), 4);
@@ -527,7 +708,8 @@ mod tests {
 
         let filename = f.file_name().unwrap();
 
-        assert!(filename.is_absolute());
+        println!("{:?}", filename);
+
         assert!(filename.parent().unwrap().is_dir());
     }
 }

@@ -15,6 +15,12 @@ doc = []
 
 [dependencies]
 libc = "0.2"
+cfg-if = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = [
+    "impl-debug", "impl-default", "minwindef", "minwinbase", "winbase", "winnt", "fileapi", "handleapi", "processenv"
+] }
 
 [package.metadata.docs.rs]
 all-features = true

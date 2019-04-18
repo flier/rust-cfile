@@ -25,16 +25,25 @@
 //! assert_eq!(r.read_line(&mut s).unwrap(), 4);
 //! assert_eq!(s, "test");
 //! ```
+#[macro_use]
+extern crate cfg_if;
+
+#[cfg(unix)]
 pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 
 mod cfile;
 mod iter;
-mod lock;
-#[cfg(any(target_os = "linux", feature = "doc"))]
-pub mod unlocked;
+
+cfg_if! {
+    if #[cfg(any(target_os = "linux", feature = "doc"))] {
+        mod lock;
+        pub mod unlocked;
+
+        pub use crate::lock::FileLock;
+    }
+}
 
 pub use crate::cfile::{
     fdopen, open, stderr, stdin, stdout, tmpfile, CFile, IntoStream, Stream, ToStream,
 };
 pub use crate::iter::{Bytes, Lines};
-pub use crate::lock::FileLock;

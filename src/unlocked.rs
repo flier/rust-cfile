@@ -8,7 +8,7 @@ use std::mem;
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::path::PathBuf;
 
-use crate::{CFile, Stream, Lines};
+use crate::{CFile, Lines, Stream};
 
 impl CFile {
     /// Returns a unlocked `CFile` stream except that they do not use locking.
@@ -168,7 +168,7 @@ impl Unlocked {
     pub fn bytes(&self) -> Bytes {
         Bytes(self)
     }
-        /// An iterator over the lines of a *FILE stream.
+    /// An iterator over the lines of a *FILE stream.
     pub fn lines(&self) -> Lines<Bytes> {
         Lines(Bytes(self))
     }
