@@ -1,6 +1,6 @@
 [package]
 name = "cfile"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 description = "Rust bindings to C FILE"
 repository = "https://github.com/flier/rust-cfile"
@@ -19,8 +19,10 @@ cfg-if = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [
-    "impl-debug", "impl-default", "minwindef", "minwinbase", "winbase", "winnt", "fileapi", "handleapi", "processenv"
-] }
+    "impl-debug", "impl-default",
+    "minwindef", "minwinbase",
+    "winbase", "winnt", "fileapi", "handleapi", "processenv",
+]}
 
 [package.metadata.docs.rs]
 all-features = true
