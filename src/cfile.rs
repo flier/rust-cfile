@@ -7,7 +7,6 @@ use std::mem;
 use std::ops::{Deref, DerefMut, Drop};
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
-use std::slice;
 use std::str;
 use std::sync::Arc;
 
@@ -396,12 +395,16 @@ cfg_if! {
             unsafe { CFile::fdopen(libc::STDERR_FILENO, "w", false) }
         }
     } else {
+        use winapi::um::processenv::GetStdHandle;
+        use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+        use winapi::um::winbase::{STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+
         /// open stdin as a read only stream
         pub fn stdin() -> io::Result<CFile> {
             unsafe {
-                let h = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_INPUT_HANDLE);
+                let h = GetStdHandle(STD_INPUT_HANDLE);
 
-                if h == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
                     CFile::fdopen(h as *mut _, "r", false)
@@ -412,9 +415,9 @@ cfg_if! {
         /// open stdout as a write only stream
         pub fn stdout() -> io::Result<CFile> {
             unsafe {
-                let h = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_OUTPUT_HANDLE);
+                let h = GetStdHandle(STD_OUTPUT_HANDLE);
 
-                if h == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
                     CFile::fdopen(h as *mut _, "w", false)
@@ -425,9 +428,9 @@ cfg_if! {
         /// open stderr as a write only stream
         pub fn stderr() -> io::Result<CFile> {
             unsafe {
-                let h = winapi::um::processenv::GetStdHandle(winapi::um::winbase::STD_ERROR_HANDLE);
+                let h = GetStdHandle(STD_ERROR_HANDLE);
 
-                if h == winapi::um::handleapi::INVALID_HANDLE_VALUE {
+                if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
                     CFile::fdopen(h as *mut _, "w", false)
@@ -541,25 +544,29 @@ impl Stream for CFile {
 
     #[cfg(target_os = "windows")]
     fn file_name(&self) -> io::Result<PathBuf> {
-        let wchar_size = mem::size_of::<winapi::um::winnt::WCHAR>();
-        let bufsize = mem::size_of::<winapi::um::fileapi::FILE_NAME_INFO>()
-            + winapi::shared::minwindef::MAX_PATH * wchar_size;
+        use winapi::shared::minwindef::MAX_PATH;
+        use winapi::um::fileapi::FILE_NAME_INFO;
+        use winapi::um::minwinbase::FileNameInfo;
+        use winapi::um::winbase::GetFileInformationByHandleEx;
+        use winapi::um::winnt::WCHAR;
+
+        let wchar_size = mem::size_of::<WCHAR>();
+        let bufsize = mem::size_of::<FILE_NAME_INFO>() + MAX_PATH * wchar_size;
         let mut buf = vec![0u8; bufsize];
 
         unsafe {
-            if winapi::um::winbase::GetFileInformationByHandleEx(
+            if GetFileInformationByHandleEx(
                 self.as_raw_handle() as *mut _,
-                winapi::um::minwinbase::FileNameInfo,
+                FileNameInfo,
                 buf.as_mut_ptr() as *mut _,
                 buf.len() as u32,
             ) == 0
             {
                 Err(io::Error::last_os_error())
             } else {
-                let fi = NonNull::new_unchecked(buf.as_mut_ptr())
-                    .cast::<winapi::um::fileapi::FILE_NAME_INFO>();
+                let fi = NonNull::new_unchecked(buf.as_mut_ptr()).cast::<FILE_NAME_INFO>();
                 let fi = fi.as_ref();
-                let filename = slice::from_raw_parts(
+                let filename = std::slice::from_raw_parts(
                     fi.FileName.as_ptr(),
                     fi.FileNameLength as usize / wchar_size,
                 );
