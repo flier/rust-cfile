@@ -1,14 +1,12 @@
 use std::convert::AsRef;
 use std::ffi::CString;
-use std::fmt;
 use std::fs::Metadata;
 use std::io;
 use std::mem;
-use std::ops::{Deref, DerefMut, Drop};
 use std::path::{Path, PathBuf};
-use std::ptr::NonNull;
 use std::str;
-use std::sync::Arc;
+
+use foreign_types::{foreign_type, ForeignType, ForeignTypeRef};
 
 cfg_if! {
     if #[cfg(unix)] {
@@ -58,8 +56,8 @@ cfg_if! {
         /// A trait for converting a raw fd to a C *FILE stream.
         pub trait ToStream: AsRawFd + Sized {
             /// Open a raw fd as C *FILE stream
-            fn to_stream(&self, mode: &str) -> io::Result<CFile> {
-                unsafe { CFile::fdopen(self.as_raw_fd(), mode, false) }
+            fn to_stream<S: AsRef<str>>(&self, mode: S) -> io::Result<&CFileRef> {
+                unsafe { CFileRef::fdopen(self.as_raw_fd(), mode) }
             }
         }
 
@@ -68,8 +66,8 @@ cfg_if! {
         /// A trait to express the ability to consume an object and acquire ownership of its stream.
         pub trait IntoStream: IntoRawFd + Sized {
             /// Consumes this raw fd, returning the raw underlying C *FILE stream.
-            fn into_stream(self, mode: &str) -> io::Result<CFile> {
-                unsafe { CFile::fdopen(self.into_raw_fd(), mode, true) }
+            fn into_stream<S: AsRef<str>>(self, mode: S) -> io::Result<CFile> {
+                unsafe { CFile::fdopen(self.into_raw_fd(), mode) }
             }
         }
 
@@ -78,8 +76,8 @@ cfg_if! {
         /// A trait for converting a raw fd to a C *FILE stream.
         pub trait ToStream: AsRawHandle + Sized {
             /// Open a raw fd as C *FILE stream
-            fn to_stream(&self, mode: &str) -> io::Result<CFile> {
-                unsafe { CFile::fdopen(self.as_raw_handle(), mode, false) }
+            fn to_stream<S: AsRef<str>>(&self, mode: S) -> io::Result<&CFileRef> {
+                unsafe { CFileRef::fdopen(self.as_raw_handle(), mode) }
             }
         }
 
@@ -88,8 +86,8 @@ cfg_if! {
         /// A trait to express the ability to consume an object and acquire ownership of its stream.
         pub trait IntoStream: IntoRawHandle + Sized {
             /// Consumes this raw fd, returning the raw underlying C *FILE stream.
-            fn into_stream(self, mode: &str) -> io::Result<CFile> {
-                unsafe { CFile::fdopen(self.into_raw_handle(), mode, true) }
+            fn into_stream<S: AsRef<str>>(self, mode: S) -> io::Result<CFile> {
+                unsafe { CFile::fdopen(self.into_raw_handle(), mode) }
             }
         }
 
@@ -103,50 +101,28 @@ macro_rules! cstr {
     };
 }
 
-/// Raw C *FILE stream.
-pub type RawFilePtr = NonNull<libc::FILE>;
+foreign_type! {
+    /// A reference to an open stream on the filesystem.
+    ///
+    /// An instance of a `CFile` can be read and/or written depending on what modes it was opened with.
+    /// `CFile` also implement `Seek` to alter the logical cursor that the file contains internally.
+    ///
+    pub type CFile: Sync + Send {
+        type CType = libc::FILE;
 
-#[derive(Debug)]
-pub struct Owned(RawFilePtr);
-
-impl Drop for Owned {
-    fn drop(&mut self) {
-        unsafe {
-            libc::fclose(self.0.as_ptr());
-        }
-    }
-}
-
-/// Raw file stream.
-#[derive(Clone, Debug)]
-pub enum RawFile {
-    Owned(Arc<Owned>),
-    Borrowed(RawFilePtr),
-}
-
-impl Deref for RawFile {
-    type Target = libc::FILE;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.stream() }
-    }
-}
-
-impl DerefMut for RawFile {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.stream() }
+        fn drop = libc::fclose;
     }
 }
 
 cfg_if! {
     if #[cfg(unix)] {
-        impl AsRawFd for RawFile {
+        impl AsRawFd for CFileRef {
             fn as_raw_fd(&self) -> RawFd {
-                unsafe { libc::fileno(self.stream()) }
+                unsafe { libc::fileno(self.as_ptr()) }
             }
         }
 
-        impl IntoRawFd for RawFile {
+        impl IntoRawFd for CFile {
             fn into_raw_fd(self) -> RawFd {
                 let fd = self.as_raw_fd();
 
@@ -156,13 +132,13 @@ cfg_if! {
             }
         }
     } else {
-        impl AsRawHandle for RawFile {
+        impl AsRawHandle for CFileRef {
             fn as_raw_handle(&self) -> RawHandle {
-                unsafe { libc::get_osfhandle(libc::fileno(self.stream())) as RawHandle }
+                unsafe { libc::get_osfhandle(libc::fileno(self.as_ptr())) as RawHandle }
             }
         }
 
-        impl IntoRawHandle for RawFile {
+        impl IntoRawHandle for CFile {
             fn into_raw_handle(self) -> RawHandle {
                 let handle = self.as_raw_handle();
 
@@ -174,89 +150,11 @@ cfg_if! {
     }
 }
 
-impl RawFile {
-    /// Extracts the raw *FILE stream.
-    pub fn as_raw(&self) -> RawFilePtr {
-        match self {
-            RawFile::Owned(s) => s.0,
-            RawFile::Borrowed(f) => *f,
-        }
-    }
-
-    /// Consumes this object, returning the raw *FILE stream.
-    pub fn into_raw(self) -> RawFilePtr {
-        let f = self.as_raw();
-
-        mem::forget(self);
-
-        f
-    }
-
-    /// Returns the raw pointer of the stream
-    pub fn stream(&self) -> *mut libc::FILE {
-        self.as_raw().as_ptr()
-    }
-
-    /// Check if it is already owned.
-    pub fn owned(&self) -> bool {
-        match self {
-            RawFile::Owned(_) => true,
-            RawFile::Borrowed(_) => false,
-        }
-    }
-}
-
 extern "C" {
     fn clearerr(file: *mut libc::FILE);
 }
 
-/// A reference to an open stream on the filesystem.
-///
-/// An instance of a `CFile` can be read and/or written depending on what modes it was opened with.
-/// `CFile` also implement `Seek` to alter the logical cursor that the file contains internally.
-///
-#[derive(Clone)]
-pub struct CFile {
-    inner: RawFile,
-}
-
-unsafe impl Sync for CFile {}
-unsafe impl Send for CFile {}
-
-impl Deref for CFile {
-    type Target = RawFile;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for CFile {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-impl CFile {
-    /// Constructs a `CFile` from a raw pointer.
-    pub unsafe fn from_raw(f: RawFilePtr, owned: bool) -> CFile {
-        CFile {
-            inner: if owned {
-                RawFile::Owned(Arc::new(Owned(f)))
-            } else {
-                RawFile::Borrowed(f)
-            },
-        }
-    }
-
-    pub unsafe fn owned(f: RawFilePtr) -> CFile {
-        Self::from_raw(f, true)
-    }
-
-    pub unsafe fn borrowed(f: RawFilePtr) -> CFile {
-        Self::from_raw(f, false)
-    }
-
+impl CFileRef {
     /// opens the file whose name is the string pointed to by `filename`
     /// and associates the stream pointed to by stream with it.
     ///
@@ -265,103 +163,162 @@ impl CFile {
     ///
     pub fn reopen(&self, filename: &str, mode: &str) -> io::Result<CFile> {
         unsafe {
-            NonNull::new(libc::freopen(cstr!(filename), cstr!(mode), self.stream()))
-                .map(|f| Self::owned(f))
-                .ok_or_else(io::Error::last_os_error)
+            let p = libc::freopen(cstr!(filename), cstr!(mode), self.as_ptr());
+
+            if p.is_null() {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(CFile::from_ptr(p))
+            }
         }
     }
 }
 
 cfg_if! {
     if #[cfg(unix)] {
+        impl CFileRef {
+            unsafe fn fdopen<S: AsRef<str>>(fd: RawFd, mode: S) -> io::Result<&'static CFileRef> {
+                let p = libc::fdopen(fd, cstr!(mode.as_ref()));
+
+                if p.is_null() {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(Self::from_ptr(p))
+                }
+            }
+        }
+
         impl CFile {
-            unsafe fn fdopen(fd: RawFd, mode: &str, owned: bool) -> io::Result<CFile> {
-                NonNull::new(libc::fdopen(fd, cstr!(mode)))
-                    .map(|f| {
-                        Self::from_raw(
-                            f,
-                            match fd {
-                                libc::STDIN_FILENO | libc::STDOUT_FILENO | libc::STDERR_FILENO => false,
-                                _ => owned,
-                            },
-                        )
-                    })
-                    .ok_or_else(io::Error::last_os_error)
+            unsafe fn fdopen<S: AsRef<str>>(fd: RawFd, mode: S) -> io::Result<CFile> {
+                CFileRef::fdopen(fd, mode).map(|f| Self::from_ptr(f.as_ptr()))
             }
         }
     } else {
-        impl CFile {
-            unsafe fn fdopen(handle: RawHandle, mode: &str, owned: bool) -> io::Result<CFile> {
+        impl CFileRef {
+            unsafe fn fdopen<S: AsRef<str>>(handle: RawHandle, mode: S) -> io::Result<&'static CFileRef> {
                 let mut flags = 0;
                 let fd = libc::open_osfhandle(handle as isize, flags);
+                let p = libc::fdopen(fd, cstr!(mode.as_ref()));
 
-                NonNull::new(libc::fdopen(fd, cstr!(mode)))
-                    .map(|f| Self::from_raw(f, owned))
-                    .ok_or_else(io::Error::last_os_error)
+                if p.is_null() {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(Self::from_ptr(p))
+                }
+            }
+        }
+
+        impl CFile {
+            unsafe fn fdopen<S: AsRef<str>>(handle: RawHandle, mode: S) -> io::Result<CFile> {
+                CFileRef::fdopen(fd, mode).map(|f| Self::from_ptr(f.as_ptr()))
             }
         }
     }
 }
 
-/// opens the file whose name is the string pointed to by filename
-/// and associates a stream with it.
-///
-/// The argument mode points to a string beginning with one of the following
-/// sequences (Additional characters may follow these sequences.)
-///
-/// ## Modes
-///
-/// * `r`   Open text file for reading.  The stream is positioned at the
-///         beginning of the file.
-///
-/// * `r+`  Open for reading and writing.  The stream is positioned at the
-///         beginning of the file.
-///
-/// * `w`     Truncate to zero length or create text file for writing.  The
-///         stream is positioned at the beginning of the file.
-///
-/// * `w+`  Open for reading and writing.  The file is created if it does not
-///         exist, otherwise it is truncated.  The stream is positioned at
-///         the beginning of the file.
-///
-/// * `a`   Open for writing.  The file is created if it does not exist.  The
-///         stream is positioned at the end of the file.  Subsequent writes
-///         to the file will always end up at the then current end of file,
-///         irrespective of any intervening fseek(3) or similar.
-///
-/// * `a+`  Open for reading and writing.  The file is created if it does not
-///         exist.  The stream is positioned at the end of the file.  Subse-
-///         quent writes to the file will always end up at the then current
-///         end of file, irrespective of any intervening fseek(3) or similar.
-///
-/// The mode string can also include the letter `b` either as last charac-
-/// ter or as a character between the characters in any of the two-character
-/// strings described above.  This is strictly for compatibility with ISO/IEC
-/// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
-///
 cfg_if! {
     if #[cfg(unix)] {
+        /// opens the file whose name is the string pointed to by filename
+        /// and associates a stream with it.
+        ///
+        /// The argument mode points to a string beginning with one of the following
+        /// sequences (Additional characters may follow these sequences.)
+        ///
+        /// ## Modes
+        ///
+        /// * `r`   Open text file for reading.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `r+`  Open for reading and writing.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `w`     Truncate to zero length or create text file for writing.  The
+        ///         stream is positioned at the beginning of the file.
+        ///
+        /// * `w+`  Open for reading and writing.  The file is created if it does not
+        ///         exist, otherwise it is truncated.  The stream is positioned at
+        ///         the beginning of the file.
+        ///
+        /// * `a`   Open for writing.  The file is created if it does not exist.  The
+        ///         stream is positioned at the end of the file.  Subsequent writes
+        ///         to the file will always end up at the then current end of file,
+        ///         irrespective of any intervening fseek(3) or similar.
+        ///
+        /// * `a+`  Open for reading and writing.  The file is created if it does not
+        ///         exist.  The stream is positioned at the end of the file.  Subse-
+        ///         quent writes to the file will always end up at the then current
+        ///         end of file, irrespective of any intervening fseek(3) or similar.
+        ///
+        /// The mode string can also include the letter `b` either as last charac-
+        /// ter or as a character between the characters in any of the two-character
+        /// strings described above.  This is strictly for compatibility with ISO/IEC
+        /// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
+        ///
         pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
             unsafe {
-                NonNull::new(libc::fopen(
+                let p = libc::fopen(
                     cstr!(path.as_ref().as_os_str().as_bytes()),
                     cstr!(mode),
-                ))
-                .map(|f| CFile::owned(f))
-                .ok_or_else(io::Error::last_os_error)
+                );
+
+                if p.is_null() {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(CFile::from_ptr(p))
+                }
             }
         }
     } else {
+        /// opens the file whose name is the string pointed to by filename
+        /// and associates a stream with it.
+        ///
+        /// The argument mode points to a string beginning with one of the following
+        /// sequences (Additional characters may follow these sequences.)
+        ///
+        /// ## Modes
+        ///
+        /// * `r`   Open text file for reading.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `r+`  Open for reading and writing.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `w`     Truncate to zero length or create text file for writing.  The
+        ///         stream is positioned at the beginning of the file.
+        ///
+        /// * `w+`  Open for reading and writing.  The file is created if it does not
+        ///         exist, otherwise it is truncated.  The stream is positioned at
+        ///         the beginning of the file.
+        ///
+        /// * `a`   Open for writing.  The file is created if it does not exist.  The
+        ///         stream is positioned at the end of the file.  Subsequent writes
+        ///         to the file will always end up at the then current end of file,
+        ///         irrespective of any intervening fseek(3) or similar.
+        ///
+        /// * `a+`  Open for reading and writing.  The file is created if it does not
+        ///         exist.  The stream is positioned at the end of the file.  Subse-
+        ///         quent writes to the file will always end up at the then current
+        ///         end of file, irrespective of any intervening fseek(3) or similar.
+        ///
+        /// The mode string can also include the letter `b` either as last charac-
+        /// ter or as a character between the characters in any of the two-character
+        /// strings described above.  This is strictly for compatibility with ISO/IEC
+        /// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
+        ///
         pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
             let filename = path.as_ref().as_os_str().to_string_lossy().to_string();
 
             unsafe {
-                NonNull::new(libc::fopen(
+                let p = libc::fopen(
                     cstr!(filename),
                     cstr!(mode),
-                ))
-                .map(|f| CFile::owned(f))
-                .ok_or_else(io::Error::last_os_error)
+                );
+
+                if p.is_null() {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(CFile::from_ptr(p))
+                }
             }
         }
     }
@@ -378,21 +335,20 @@ cfg_if! {
         ///
         /// let stdin = cfile::stdin().unwrap();
         ///
-        /// assert!(!stdin.owned());
         /// assert_eq!(stdin.as_raw_fd(), cfile::STDIN_FILENO);
         /// ```
-        pub fn stdin() -> io::Result<CFile> {
-            unsafe { CFile::fdopen(libc::STDIN_FILENO, "r", false) }
+        pub fn stdin() -> io::Result<&'static CFileRef> {
+            unsafe { CFileRef::fdopen(libc::STDIN_FILENO, "r") }
         }
 
         /// open stdout as a write only stream
-        pub fn stdout() -> io::Result<CFile> {
-            unsafe { CFile::fdopen(libc::STDOUT_FILENO, "w", false) }
+        pub fn stdout() -> io::Result<&'static CFileRef> {
+            unsafe { CFileRef::fdopen(libc::STDOUT_FILENO, "w") }
         }
 
         /// open stderr as a write only stream
-        pub fn stderr() -> io::Result<CFile> {
-            unsafe { CFile::fdopen(libc::STDERR_FILENO, "w", false) }
+        pub fn stderr() -> io::Result<&'static CFileRef> {
+            unsafe { CFileRef::fdopen(libc::STDERR_FILENO, "w") }
         }
     } else {
         use winapi::um::processenv::GetStdHandle;
@@ -400,40 +356,40 @@ cfg_if! {
         use winapi::um::winbase::{STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
 
         /// open stdin as a read only stream
-        pub fn stdin() -> io::Result<CFile> {
+        pub fn stdin() -> io::Result<&CFileRef> {
             unsafe {
                 let h = GetStdHandle(STD_INPUT_HANDLE);
 
                 if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
-                    CFile::fdopen(h as *mut _, "r", false)
+                    CFileRef::fdopen(h as *mut _, "r", false)
                 }
             }
         }
 
         /// open stdout as a write only stream
-        pub fn stdout() -> io::Result<CFile> {
+        pub fn stdout() -> io::Result<&CFileRef> {
             unsafe {
                 let h = GetStdHandle(STD_OUTPUT_HANDLE);
 
                 if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
-                    CFile::fdopen(h as *mut _, "w", false)
+                    CFileRef::fdopen(h as *mut _, "w", false)
                 }
             }
         }
 
         /// open stderr as a write only stream
-        pub fn stderr() -> io::Result<CFile> {
+        pub fn stderr() -> io::Result<&CFileRef> {
             unsafe {
                 let h = GetStdHandle(STD_ERROR_HANDLE);
 
                 if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
-                    CFile::fdopen(h as *mut _, "w", false)
+                    CFileRef::fdopen(h as *mut _, "w", false)
                 }
             }
         }
@@ -443,9 +399,13 @@ cfg_if! {
 /// open a temporary file as a read/write stream
 pub fn tmpfile() -> io::Result<CFile> {
     unsafe {
-        NonNull::new(libc::tmpfile())
-            .map(|f| CFile::owned(f))
-            .ok_or_else(io::Error::last_os_error)
+        let p = libc::tmpfile();
+
+        if p.is_null() {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(CFile::from_ptr(p))
+        }
     }
 }
 
@@ -456,7 +416,7 @@ cfg_if! {
         /// The mode of the stream must be compatible with the mode of the file descriptor.
         ///
         pub fn fdopen<S: AsRawFd>(s: &S, mode: &str) -> io::Result<CFile> {
-            unsafe { CFile::fdopen(s.as_raw_fd(), mode, true) }
+            unsafe { CFile::fdopen(s.as_raw_fd(), mode) }
         }
     } else {
         /// associates a stream with the existing file descriptor.
@@ -464,14 +424,14 @@ cfg_if! {
         /// The mode of the stream must be compatible with the mode of the file descriptor.
         ///
         pub fn fdopen<S: AsRawHandle>(s: &S, mode: &str) -> io::Result<CFile> {
-            unsafe { CFile::fdopen(s.as_raw_handle(), mode, true) }
+            unsafe { CFile::fdopen(s.as_raw_handle(), mode) }
         }
     }
 }
 
-impl Stream for CFile {
+impl Stream for CFileRef {
     fn position(&self) -> io::Result<u64> {
-        let off = unsafe { libc::ftell(self.stream()) };
+        let off = unsafe { libc::ftell(self.as_ptr()) };
 
         if off < 0 {
             if let Some(err) = self.last_error() {
@@ -484,12 +444,12 @@ impl Stream for CFile {
 
     #[inline]
     fn eof(&self) -> bool {
-        unsafe { libc::feof(self.stream()) != 0 }
+        unsafe { libc::feof(self.as_ptr()) != 0 }
     }
 
     #[inline]
     fn errno(&self) -> i32 {
-        unsafe { libc::ferror(self.stream()) }
+        unsafe { libc::ferror(self.as_ptr()) }
     }
 
     fn last_error(&self) -> Option<io::Error> {
@@ -508,7 +468,7 @@ impl Stream for CFile {
     }
 
     fn clear_error(&self) {
-        unsafe { clearerr(self.stream()) }
+        unsafe { clearerr(self.as_ptr()) }
     }
 
     #[cfg(target_os = "linux")]
@@ -590,7 +550,7 @@ impl Stream for CFile {
                 elements.as_mut_ptr() as *mut libc::c_void,
                 mem::size_of::<T>(),
                 elements.len(),
-                self.stream(),
+                self.as_ptr(),
             )
         };
 
@@ -613,7 +573,7 @@ impl Stream for CFile {
                 elements.as_ptr() as *const libc::c_void,
                 mem::size_of::<T>(),
                 elements.len(),
-                self.stream(),
+                self.as_ptr(),
             )
         };
 
@@ -629,17 +589,39 @@ impl Stream for CFile {
 
 impl io::Read for CFile {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.read_slice(buf)
+        self.as_mut().read_slice(buf)
     }
 }
 
 impl io::Write for CFile {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.as_mut().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.as_mut().flush()
+    }
+}
+
+impl io::Seek for CFile {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        self.as_mut().seek(pos)
+    }
+}
+
+impl io::Read for CFileRef {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.read_slice(buf)
+    }
+}
+
+impl io::Write for CFileRef {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.write_slice(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if unsafe { libc::fflush(self.stream()) } != 0 {
+        if unsafe { libc::fflush(self.as_ptr()) } != 0 {
             if let Some(err) = self.last_error() {
                 return Err(err);
             }
@@ -660,13 +642,13 @@ cfg_if! {
     }
 }
 
-impl io::Seek for CFile {
+impl io::Seek for CFileRef {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         let ret = unsafe {
             match pos {
-                io::SeekFrom::Start(off) => fseek64(self.stream(), off as i64, libc::SEEK_SET),
-                io::SeekFrom::End(off) => fseek64(self.stream(), off, libc::SEEK_END),
-                io::SeekFrom::Current(off) => fseek64(self.stream(), off, libc::SEEK_CUR),
+                io::SeekFrom::Start(off) => fseek64(self.as_ptr(), off as i64, libc::SEEK_SET),
+                io::SeekFrom::End(off) => fseek64(self.as_ptr(), off, libc::SEEK_END),
+                io::SeekFrom::Current(off) => fseek64(self.as_ptr(), off, libc::SEEK_CUR),
             }
         };
 
@@ -677,15 +659,6 @@ impl io::Seek for CFile {
         }
 
         self.position()
-    }
-}
-
-impl fmt::Debug for CFile {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.inner {
-            RawFile::Owned(_) => write!(f, "CFile(Owned({:p}))", self.stream()),
-            RawFile::Borrowed(_) => write!(f, "CFile(Borrowed({:p})", self.stream()),
-        }
     }
 }
 

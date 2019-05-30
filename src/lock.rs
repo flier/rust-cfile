@@ -1,18 +1,20 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::cfile::CFile;
+use foreign_types::ForeignTypeRef;
+
+use crate::cfile::CFileRef;
 
 /// A locked reference to the `CFile` stream.
-pub struct FileLock<'a>(&'a mut CFile);
+pub struct FileLock<'a>(&'a mut CFileRef);
 
 impl<'a> Drop for FileLock<'a> {
     fn drop(&mut self) {
-        unsafe { funlockfile(self.0.stream()) }
+        unsafe { funlockfile(self.0.as_ptr()) }
     }
 }
 
 impl<'a> Deref for FileLock<'a> {
-    type Target = CFile;
+    type Target = CFileRef;
 
     fn deref(&self) -> &Self::Target {
         self.0
@@ -25,7 +27,7 @@ impl<'a> DerefMut for FileLock<'a> {
     }
 }
 
-impl CFile {
+impl CFileRef {
     /// acquires an exclusive lock on the specified object.
     ///
     /// If another thread has already locked the object,
@@ -42,7 +44,7 @@ impl CFile {
     /// assert_eq!(l.write(b"test").unwrap(), 4);
     /// ```
     pub fn lock(&mut self) -> FileLock {
-        unsafe { flockfile(self.stream()) }
+        unsafe { flockfile(self.as_ptr()) }
 
         FileLock(self)
     }
@@ -71,7 +73,7 @@ impl CFile {
     /// assert_eq!(s, "test");
     /// ```
     pub fn try_lock(&mut self) -> Option<FileLock> {
-        if unsafe { ftrylockfile(self.stream()) } == 0 {
+        if unsafe { ftrylockfile(self.as_ptr()) } == 0 {
             Some(FileLock(self))
         } else {
             None

@@ -16,6 +16,7 @@ doc = []
 [dependencies]
 libc = "0.2"
 cfg-if = "0.1"
+foreign-types = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [

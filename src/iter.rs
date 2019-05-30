@@ -1,15 +1,17 @@
 use std::io;
 
-use crate::cfile::CFile;
+use foreign_types::ForeignTypeRef;
+
+use crate::cfile::CFileRef;
 
 /// An iterator over the bytes of a *FILE stream.
-pub struct Bytes<'a>(&'a CFile);
+pub struct Bytes<'a>(&'a CFileRef);
 
 impl<'a> Iterator for Bytes<'a> {
     type Item = io::Result<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let b = unsafe { libc::fgetc(self.0.stream()) };
+        let b = unsafe { libc::fgetc(self.0.as_ptr()) };
 
         if b == libc::EOF {
             let err = io::Error::last_os_error();
@@ -25,7 +27,7 @@ impl<'a> Iterator for Bytes<'a> {
     }
 }
 
-impl<'a> IntoIterator for &'a CFile {
+impl<'a> IntoIterator for &'a CFileRef {
     type Item = io::Result<u8>;
     type IntoIter = Bytes<'a>;
 
@@ -61,7 +63,7 @@ where
     }
 }
 
-impl CFile {
+impl CFileRef {
     /// An iterator over the bytes of a *FILE stream.
     pub fn bytes(&self) -> Bytes {
         Bytes(self)

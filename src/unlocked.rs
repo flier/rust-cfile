@@ -8,6 +8,8 @@ use std::mem;
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 use std::path::PathBuf;
 
+use foreign_types::ForeignType;
+
 use crate::{CFile, Lines, Stream};
 
 impl CFile {
@@ -18,12 +20,11 @@ impl CFile {
 }
 
 /// A unlocked `CFile` stream except that they do not use locking.
-#[derive(Clone, Debug)]
 pub struct Unlocked(CFile);
 
 impl AsRawFd for Unlocked {
     fn as_raw_fd(&self) -> RawFd {
-        unsafe { fileno_unlocked(self.0.stream()) }
+        unsafe { fileno_unlocked(self.0.as_ptr()) }
     }
 }
 
@@ -49,7 +50,7 @@ impl Write for Unlocked {
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if unsafe { fflush_unlocked(self.0.stream()) } != 0 {
+        if unsafe { fflush_unlocked(self.0.as_ptr()) } != 0 {
             if let Some(err) = self.last_error() {
                 return Err(err);
             }
@@ -73,12 +74,12 @@ impl Stream for Unlocked {
 
     #[inline]
     fn eof(&self) -> bool {
-        unsafe { feof_unlocked(self.0.stream()) != 0 }
+        unsafe { feof_unlocked(self.0.as_ptr()) != 0 }
     }
 
     #[inline]
     fn errno(&self) -> i32 {
-        unsafe { ferror_unlocked(self.0.stream()) }
+        unsafe { ferror_unlocked(self.0.as_ptr()) }
     }
 
     fn last_error(&self) -> Option<io::Error> {
@@ -98,7 +99,7 @@ impl Stream for Unlocked {
 
     #[inline]
     fn clear_error(&self) {
-        unsafe { clearerr_unlocked(self.0.stream()) }
+        unsafe { clearerr_unlocked(self.0.as_ptr()) }
     }
 
     #[inline]
@@ -121,7 +122,7 @@ impl Stream for Unlocked {
                 elements.as_mut_ptr() as *mut libc::c_void,
                 mem::size_of::<T>(),
                 elements.len(),
-                self.0.stream(),
+                self.0.as_ptr(),
             )
         };
 
@@ -144,7 +145,7 @@ impl Stream for Unlocked {
                 elements.as_ptr() as *const libc::c_void,
                 mem::size_of::<T>(),
                 elements.len(),
-                self.0.stream(),
+                self.0.as_ptr(),
             )
         };
 
@@ -181,7 +182,7 @@ impl<'a> Iterator for Bytes<'a> {
     type Item = io::Result<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let b = unsafe { fgetc_unlocked((self.0).0.stream()) };
+        let b = unsafe { fgetc_unlocked((self.0).0.as_ptr()) };
 
         if b == libc::EOF {
             let err = io::Error::last_os_error();
