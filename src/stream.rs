@@ -213,6 +213,8 @@ impl Stream for CFileRef {
 
     #[cfg(target_os = "linux")]
     fn file_name(&self) -> io::Result<PathBuf> {
+        use std::fs::Path;
+
         let s = format!("/proc/self/fd/{}", self.as_raw_fd());
         let p = Path::new(&s);
 
