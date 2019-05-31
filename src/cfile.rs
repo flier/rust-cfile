@@ -12,7 +12,6 @@ cfg_if! {
         use std::os::unix::ffi::OsStrExt;
         use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
     } else {
-        use std::os::windows::ffi::OsStringExt;
         use std::os::windows::io::{AsRawHandle, IntoRawHandle, RawHandle};
     }
 }

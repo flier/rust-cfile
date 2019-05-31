@@ -11,6 +11,7 @@ cfg_if! {
     } else {
         use std::ffi::OsString;
         use std::ptr::NonNull;
+        use std::os::windows::ffi::OsStringExt;
         use std::os::windows::io::{AsRawHandle, IntoRawHandle};
     }
 }
