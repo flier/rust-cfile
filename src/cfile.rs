@@ -12,7 +12,6 @@ cfg_if! {
         use std::os::unix::ffi::OsStrExt;
         use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
     } else {
-        use std::ptr::NonNull;
         use std::os::windows::ffi::OsStringExt;
         use std::os::windows::io::{AsRawHandle, IntoRawHandle, RawHandle};
     }
@@ -93,50 +92,110 @@ impl CFileRef {
     }
 }
 
-/// opens the file whose name is the string pointed to by filename
-/// and associates a stream with it.
-///
-/// The argument mode points to a string beginning with one of the following
-/// sequences (Additional characters may follow these sequences.)
-///
-/// ## Modes
-///
-/// * `r`   Open text file for reading.  The stream is positioned at the
-///         beginning of the file.
-///
-/// * `r+`  Open for reading and writing.  The stream is positioned at the
-///         beginning of the file.
-///
-/// * `w`     Truncate to zero length or create text file for writing.  The
-///         stream is positioned at the beginning of the file.
-///
-/// * `w+`  Open for reading and writing.  The file is created if it does not
-///         exist, otherwise it is truncated.  The stream is positioned at
-///         the beginning of the file.
-///
-/// * `a`   Open for writing.  The file is created if it does not exist.  The
-///         stream is positioned at the end of the file.  Subsequent writes
-///         to the file will always end up at the then current end of file,
-///         irrespective of any intervening fseek(3) or similar.
-///
-/// * `a+`  Open for reading and writing.  The file is created if it does not
-///         exist.  The stream is positioned at the end of the file.  Subse-
-///         quent writes to the file will always end up at the then current
-///         end of file, irrespective of any intervening fseek(3) or similar.
-///
-/// The mode string can also include the letter `b` either as last charac-
-/// ter or as a character between the characters in any of the two-character
-/// strings described above.  This is strictly for compatibility with ISO/IEC
-/// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
-///
-pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
-    unsafe {
-        let p = libc::fopen(cstr!(path.as_ref().as_os_str().as_bytes()), cstr!(mode));
+cfg_if! {
+    if #[cfg(unix)] {
+        /// opens the file whose name is the string pointed to by filename
+        /// and associates a stream with it.
+        ///
+        /// The argument mode points to a string beginning with one of the following
+        /// sequences (Additional characters may follow these sequences.)
+        ///
+        /// ## Modes
+        ///
+        /// * `r`   Open text file for reading.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `r+`  Open for reading and writing.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `w`     Truncate to zero length or create text file for writing.  The
+        ///         stream is positioned at the beginning of the file.
+        ///
+        /// * `w+`  Open for reading and writing.  The file is created if it does not
+        ///         exist, otherwise it is truncated.  The stream is positioned at
+        ///         the beginning of the file.
+        ///
+        /// * `a`   Open for writing.  The file is created if it does not exist.  The
+        ///         stream is positioned at the end of the file.  Subsequent writes
+        ///         to the file will always end up at the then current end of file,
+        ///         irrespective of any intervening fseek(3) or similar.
+        ///
+        /// * `a+`  Open for reading and writing.  The file is created if it does not
+        ///         exist.  The stream is positioned at the end of the file.  Subse-
+        ///         quent writes to the file will always end up at the then current
+        ///         end of file, irrespective of any intervening fseek(3) or similar.
+        ///
+        /// The mode string can also include the letter `b` either as last charac-
+        /// ter or as a character between the characters in any of the two-character
+        /// strings described above.  This is strictly for compatibility with ISO/IEC
+        /// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
+        ///
+        pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
+            unsafe {
+                let p = libc::fopen(
+                    cstr!(path.as_ref().as_os_str().as_bytes()),
+                    cstr!(mode),
+                );
 
-        if p.is_null() {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(CFile::from_ptr(p))
+                if p.is_null() {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(CFile::from_ptr(p))
+                }
+            }
+        }
+    } else {
+        /// opens the file whose name is the string pointed to by filename
+        /// and associates a stream with it.
+        ///
+        /// The argument mode points to a string beginning with one of the following
+        /// sequences (Additional characters may follow these sequences.)
+        ///
+        /// ## Modes
+        ///
+        /// * `r`   Open text file for reading.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `r+`  Open for reading and writing.  The stream is positioned at the
+        ///         beginning of the file.
+        ///
+        /// * `w`     Truncate to zero length or create text file for writing.  The
+        ///         stream is positioned at the beginning of the file.
+        ///
+        /// * `w+`  Open for reading and writing.  The file is created if it does not
+        ///         exist, otherwise it is truncated.  The stream is positioned at
+        ///         the beginning of the file.
+        ///
+        /// * `a`   Open for writing.  The file is created if it does not exist.  The
+        ///         stream is positioned at the end of the file.  Subsequent writes
+        ///         to the file will always end up at the then current end of file,
+        ///         irrespective of any intervening fseek(3) or similar.
+        ///
+        /// * `a+`  Open for reading and writing.  The file is created if it does not
+        ///         exist.  The stream is positioned at the end of the file.  Subse-
+        ///         quent writes to the file will always end up at the then current
+        ///         end of file, irrespective of any intervening fseek(3) or similar.
+        ///
+        /// The mode string can also include the letter `b` either as last charac-
+        /// ter or as a character between the characters in any of the two-character
+        /// strings described above.  This is strictly for compatibility with ISO/IEC
+        /// 9899:1990 (ISO C90) and has no effect; the `b` is ignored.
+        ///
+        pub fn open<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<CFile> {
+            let filename = path.as_ref().to_string_lossy().to_string();
+
+            unsafe {
+                let p = libc::fopen(
+                    cstr!(filename),
+                    cstr!(mode),
+                );
+
+                if p.is_null() {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(CFile::from_ptr(p))
+                }
+            }
         }
     }
 }
@@ -264,7 +323,7 @@ cfg_if! {
             pub fn fdopen<S: AsRef<str>>(handle: RawHandle, mode: S) -> io::Result<&'static CFileRef> {
                 unsafe {
                     let mode = mode.as_ref();
-                    let flags = if mode == "r" { libc::_O_RDONLY } else {0};
+                    let flags = if mode == "r" { libc::O_RDONLY } else {0};
                     let fd = libc::open_osfhandle(handle as isize, flags);
 
                     if fd == -1 {
