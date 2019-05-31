@@ -1,3 +1,5 @@
+//! Rust bindings to C *FILE stream
+//!
 //! # Examples
 //!
 //! ```
@@ -28,11 +30,9 @@
 #[macro_use]
 extern crate cfg_if;
 
-#[cfg(unix)]
-pub use libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
-
 mod cfile;
 mod iter;
+mod stream;
 
 cfg_if! {
     if #[cfg(any(target_os = "linux", feature = "doc"))] {
@@ -43,7 +43,6 @@ cfg_if! {
     }
 }
 
-pub use crate::cfile::{
-    fdopen, open, stderr, stdin, stdout, tmpfile, CFile, CFileRef, IntoStream, Stream, ToStream,
-};
+pub use crate::cfile::{fdopen, open, stderr, stdin, stdout, tmpfile, CFile, CFileRef};
 pub use crate::iter::{Bytes, Lines};
+pub use crate::stream::{IntoStream, Stream, ToStream};
