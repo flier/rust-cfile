@@ -197,14 +197,20 @@ cfg_if! {
     } else {
         impl CFileRef {
             unsafe fn fdopen<S: AsRef<str>>(handle: RawHandle, mode: S) -> io::Result<&'static CFileRef> {
-                let mut flags = 0;
+                let mode = mode.as_ref();
+                let flags = if mode == "r" { libc::_O_RDONLY } else {0};
                 let fd = libc::open_osfhandle(handle as isize, flags);
-                let p = libc::fdopen(fd, cstr!(mode.as_ref()));
 
-                if p.is_null() {
+                if fd == -1 {
                     Err(io::Error::last_os_error())
                 } else {
-                    Ok(Self::from_ptr(p))
+                    let p = libc::fdopen(fd, cstr!(mode));
+
+                    if p.is_null() {
+                        Err(io::Error::last_os_error())
+                    } else {
+                        Ok(Self::from_ptr(p))
+                    }
                 }
             }
         }
