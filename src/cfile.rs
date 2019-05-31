@@ -14,6 +14,7 @@ cfg_if! {
         use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
     } else {
         use std::ffi::OsString;
+        use std::ptr::NonNull;
         use std::os::windows::ffi::OsStringExt;
         use std::os::windows::io::{AsRawHandle, IntoRawHandle, RawHandle};
     }
@@ -210,7 +211,7 @@ cfg_if! {
 
         impl CFile {
             unsafe fn fdopen<S: AsRef<str>>(handle: RawHandle, mode: S) -> io::Result<CFile> {
-                CFileRef::fdopen(fd, mode).map(|f| Self::from_ptr(f.as_ptr()))
+                CFileRef::fdopen(handle, mode).map(|f| Self::from_ptr(f.as_ptr()))
             }
         }
     }
@@ -356,40 +357,40 @@ cfg_if! {
         use winapi::um::winbase::{STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
 
         /// open stdin as a read only stream
-        pub fn stdin() -> io::Result<&CFileRef> {
+        pub fn stdin() -> io::Result<&'static CFileRef> {
             unsafe {
                 let h = GetStdHandle(STD_INPUT_HANDLE);
 
                 if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
-                    CFileRef::fdopen(h as *mut _, "r", false)
+                    CFileRef::fdopen(h as *mut _, "r")
                 }
             }
         }
 
         /// open stdout as a write only stream
-        pub fn stdout() -> io::Result<&CFileRef> {
+        pub fn stdout() -> io::Result<&'static CFileRef> {
             unsafe {
                 let h = GetStdHandle(STD_OUTPUT_HANDLE);
 
                 if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
-                    CFileRef::fdopen(h as *mut _, "w", false)
+                    CFileRef::fdopen(h as *mut _, "w")
                 }
             }
         }
 
         /// open stderr as a write only stream
-        pub fn stderr() -> io::Result<&CFileRef> {
+        pub fn stderr() -> io::Result<&'static CFileRef> {
             unsafe {
                 let h = GetStdHandle(STD_ERROR_HANDLE);
 
                 if h == INVALID_HANDLE_VALUE {
                     Err(io::Error::last_os_error())
                 } else {
-                    CFileRef::fdopen(h as *mut _, "w", false)
+                    CFileRef::fdopen(h as *mut _, "w")
                 }
             }
         }
