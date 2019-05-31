@@ -45,4 +45,4 @@ cfg_if! {
 
 pub use crate::cfile::{fdopen, open, stderr, stdin, stdout, tmpfile, CFile, CFileRef};
 pub use crate::iter::{Bytes, Lines};
-pub use crate::stream::{IntoStream, Stream, ToStream};
+pub use crate::stream::{AsStream, IntoStream, Stream};

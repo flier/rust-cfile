@@ -53,14 +53,14 @@ pub trait Stream: io::Read + io::Write + io::Seek {
 cfg_if! {
     if #[cfg(unix)] {
         /// A trait for converting a raw fd to a C *FILE stream.
-        pub trait ToStream: AsRawFd + Sized {
+        pub trait AsStream: AsRawFd + Sized {
             /// Open a raw fd as C *FILE stream
-            fn to_stream<S: AsRef<str>>(&self, mode: S) -> io::Result<&CFileRef> {
-                CFileRef::fdopen(self.as_raw_fd(), mode)
+            fn as_stream<S: AsRef<str>>(&self, mode: S) -> io::Result<CFile> {
+                CFile::fdopen(self.as_raw_fd(), mode)
             }
         }
 
-        impl<S: AsRawFd + Sized> ToStream for S {}
+        impl<S: AsRawFd + Sized> AsStream for S {}
 
         /// A trait to express the ability to consume an object and acquire ownership of its stream.
         pub trait IntoStream: IntoRawFd + Sized {
@@ -73,14 +73,14 @@ cfg_if! {
         impl<S: IntoRawFd + Sized> IntoStream for S {}
     } else {
         /// A trait for converting a raw fd to a C *FILE stream.
-        pub trait ToStream: AsRawHandle + Sized {
+        pub trait AsStream: AsRawHandle + Sized {
             /// Open a raw fd as C *FILE stream
-            fn to_stream<S: AsRef<str>>(&self, mode: S) -> io::Result<&CFileRef> {
-                CFileRef::fdopen(self.as_raw_handle(), mode)
+            fn as_stream<S: AsRef<str>>(&self, mode: S) -> io::Result<CFile> {
+                CFile::fdopen(self.as_raw_handle(), mode)
             }
         }
 
-        impl<S: AsRawHandle + Sized> ToStream for S {}
+        impl<S: AsRawHandle + Sized> AsStream for S {}
 
         /// A trait to express the ability to consume an object and acquire ownership of its stream.
         pub trait IntoStream: IntoRawHandle + Sized {
