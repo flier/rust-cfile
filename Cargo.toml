@@ -2,12 +2,18 @@
 name = "cfile"
 version = "0.4.0"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
-description = "Rust bindings to C FILE"
+description = "Rust bindings to C *FILE stream"
 repository = "https://github.com/flier/rust-cfile"
 documentation = "http://flier.github.io/rust-cfile/release/0.2/cfile/"
 readme = "README.md"
 license = "MIT"
+keywords = ["cfile", "file", "stream", "ffi"]
+categories = ["api-bindings", "filesystem", "os::unix-apis", "os::windows-apis"]
 edition = "2018"
+
+[badges]
+appveyor = { repository = "flier/rust-cfile", service = "github" }
+travis-ci = { repository = "flier/rust-cfile" }
 
 [features]
 default = []
