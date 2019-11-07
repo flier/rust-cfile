@@ -4,7 +4,7 @@ version = "0.5.0"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 description = "Rust bindings to C *FILE stream"
 repository = "https://github.com/flier/rust-cfile"
-documentation = "http://flier.github.io/rust-cfile/release/0.2/cfile/"
+documentation = "https://docs.rs/crate/cfile/"
 readme = "README.md"
 license = "MIT"
 keywords = ["cfile", "file", "stream", "ffi"]
@@ -22,7 +22,7 @@ doc = []
 [dependencies]
 libc = "0.2"
 cfg-if = "0.1"
-foreign-types = "0.4"
+foreign-types = "0.5"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [

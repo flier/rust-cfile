@@ -30,6 +30,9 @@
 #[macro_use]
 extern crate cfg_if;
 
+#[doc(hidden)]
+pub extern crate foreign_types;
+
 mod cfile;
 mod iter;
 mod stream;

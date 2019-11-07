@@ -28,7 +28,7 @@ foreign_type! {
     /// An instance of a `CFile` can be read and/or written depending on what modes it was opened with.
     /// `CFile` also implement `Seek` to alter the logical cursor that the file contains internally.
     ///
-    pub type CFile: Send {
+    pub unsafe type CFile: Send {
         type CType = libc::FILE;
 
         fn drop = libc::fclose;
